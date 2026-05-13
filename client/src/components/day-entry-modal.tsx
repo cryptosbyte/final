@@ -85,8 +85,65 @@ const TYPE_LABELS: Record<RevisionType, string> = {
   exam_practice: "Exam Paper Practice",
   past_paper: "Past Paper Questions",
   mixed_exercises: "Mixed Exercises",
-  anki_flashcards: "Anki Flashcard Revision"
+  anki_flashcards: "Anki Flashcard Revision",
+  day_event: "Day Event",
 };
+function DayEventsContent({
+  events,
+  onChange,
+}: {
+  events: string[];
+  onChange: (next: string[]) => void;
+}) {
+  const addEvent = () => onChange([...events, ""]);
+  const updateEvent = (index: number, value: string) => {
+    onChange(events.map((event, i) => (i === index ? value : event)));
+  };
+  const removeEvent = (index: number) => {
+    onChange(events.filter((_, i) => i !== index));
+  };
+  return (
+    <div className="space-y-2 mt-3" data-testid="day-events">
+      {events.length === 0 && (
+        <p className="text-xs text-muted-foreground italic">No day events yet.</p>
+      )}
+      {events.map((event, index) => (
+        <div key={`${index}-${event}`} className="flex items-center gap-2">
+          <input
+            value={event}
+            onChange={(e) => updateEvent(index, e.target.value)}
+            placeholder="Event or note"
+            className="flex-1 text-xs bg-background border border-border rounded-md px-2 py-1.5 outline-none"
+          />
+          <button type="button" onClick={() => removeEvent(index)} className="text-xs text-muted-foreground hover:text-destructive">
+            Remove
+          </button>
+        </div>
+      ))}
+      <button type="button" onClick={addEvent} className="text-xs font-semibold text-[hsl(var(--primary))]">
+        + Add event
+      </button>
+    </div>
+  );
+}
+
+function normalizeSubjects(subjects: Partial<Record<Subject, SubjectEntry>>): Partial<Record<Subject, SubjectEntry>> {
+  const next = { ...subjects };
+  (Object.keys(next) as Subject[]).forEach((subject) => {
+    const entry = next[subject];
+    if (!entry) return;
+    next[subject] = {
+      types: entry.types ?? [],
+      productivity: entry.productivity ?? 0,
+      events: entry.events ?? [],
+      moduleContent: entry.moduleContent ?? [],
+      examPaperRecords: entry.examPaperRecords ?? [],
+      ankiSessions: entry.ankiSessions ?? [],
+      notes: entry.notes ?? "",
+    };
+  });
+  return next;
+}
 
 const ALL_BIOLOGY_TOPICS: { id: string; label: string }[] = [];
 // Filled below after BIOLOGY_MODULES is declared.
@@ -710,7 +767,7 @@ export function DayEntryModal({ date, anchorRect, existingEntry, allData, onClos
 
   useEffect(() => {
     if (existingEntry) {
-      setSubjects(existingEntry.subjects || {});
+      setSubjects(normalizeSubjects(existingEntry.subjects || {}));
       setNotes(existingEntry.notes || "");
     } else {
       setSubjects({});
@@ -833,6 +890,16 @@ export function DayEntryModal({ date, anchorRect, existingEntry, allData, onClos
       return {
         ...prev,
         [subject]: { ...currentSubject, ankiSessions: sessions }
+      };
+    });
+  };
+
+  const setEvents = (subject: Subject, events: string[]) => {
+    setSubjects(prev => {
+      const currentSubject = prev[subject] || { types: [], productivity: 0, events: [], notes: "" };
+      return {
+        ...prev,
+        [subject]: { ...currentSubject, events, types: Array.from(new Set([...currentSubject.types, "day_event"])) }
       };
     });
   };
@@ -1070,6 +1137,16 @@ export function DayEntryModal({ date, anchorRect, existingEntry, allData, onClos
                     />
                   </div>
                 )}
+
+                <div className="border-t border-border/50 pt-4">
+                  <Label className="text-xs text-muted-foreground uppercase tracking-wider">
+                    Day events
+                  </Label>
+                  <DayEventsContent
+                    events={entry.events || []}
+                    onChange={(next) => setEvents(subject, next)}
+                  />
+                </div>
 
                 {showModuleContent && (
                   <div className="border-t border-border/50 pt-4">

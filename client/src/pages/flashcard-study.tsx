@@ -62,6 +62,7 @@ export default function FlashcardStudyPage() {
   const [history, setHistory] = useState<ReviewHistoryEntry[]>([]);
   const [stats, setStats] = useState({ done: 0, again: 0, good: 0 });
   const [deckSubject, setDeckSubject] = useState<string>("");
+  const [deckTopicId, setDeckTopicId] = useState<string>("");
   const [isLandscape, setIsLandscape] = useState<boolean>(() =>
     typeof window === "undefined" ? true : window.innerWidth >= window.innerHeight,
   );
@@ -91,8 +92,11 @@ export default function FlashcardStudyPage() {
       .finally(() => setLoaded(true));
     // Fetch deck metadata so we know which subject the time should count
     // toward on today's calendar entry.
-    jsonFetch<{ subject?: string }>(`/api/flashcard-decks/${deckId}`)
-      .then(j => { if (j.subject) setDeckSubject(j.subject); })
+    jsonFetch<{ subject?: string; parentId?: string | null; name?: string }>(`/api/flashcard-decks/${deckId}`)
+      .then(j => {
+        if (j.subject) setDeckSubject(j.subject);
+        if (j.subject === "biology" && j.parentId && j.name) setDeckTopicId(j.name);
+      })
       .catch(() => { /* non-fatal */ });
   }, [user, deckId, toast]);
 
@@ -131,6 +135,7 @@ export default function FlashcardStudyPage() {
       recordFlashcardStudyTime({
         deckId,
         deckSubject,
+        deckTopicId: deckSubject === "biology" ? deckTopicId : undefined,
         totalSessionMs: sessionMsRef.current,
         loggedIn: !!user,
       });
