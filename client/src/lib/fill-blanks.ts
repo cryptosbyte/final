@@ -50,24 +50,39 @@ export function stripForFill(text: string): string {
 /**
  * Build fill-blank tokens from a card's front and back text.
  * Returns tokens (alternating text/blank) and the ordered answers array.
+ * At most 3 random non-filler words are chosen as blanks.
  */
 export function buildFillTokens(
   front: string,
   back: string,
 ): { tokens: FillToken[]; answers: string[] } {
   const combined = stripForFill(front) + "\n\n" + stripForFill(back);
-  // Split on word boundaries, capturing words of 4+ alpha chars
   const parts = combined.split(/(\b[A-Za-z]{4,}\b)/);
+
+  // First pass: identify all candidate blank positions (indices into parts[])
+  const candidateIndices: number[] = [];
+  for (let i = 0; i < parts.length; i++) {
+    const p = parts[i];
+    if (/^[A-Za-z]{4,}$/.test(p) && !STOP_WORDS.has(p.toLowerCase())) {
+      candidateIndices.push(i);
+    }
+  }
+
+  // Randomly select up to 3 candidates
+  const shuffled = [...candidateIndices].sort(() => Math.random() - 0.5);
+  const selectedSet = new Set(shuffled.slice(0, 3));
 
   const tokens: FillToken[] = [];
   const answers: string[] = [];
-  let idx = 0;
+  let blankIdx = 0;
 
-  for (const part of parts) {
-    if (/^[A-Za-z]{4,}$/.test(part) && !STOP_WORDS.has(part.toLowerCase())) {
-      tokens.push({ type: "blank", value: part, blankIndex: idx });
+  for (let i = 0; i < parts.length; i++) {
+    const part = parts[i];
+    const isCandidate = /^[A-Za-z]{4,}$/.test(part) && !STOP_WORDS.has(part.toLowerCase());
+    if (isCandidate && selectedSet.has(i)) {
+      tokens.push({ type: "blank", value: part, blankIndex: blankIdx });
       answers.push(part);
-      idx++;
+      blankIdx++;
     } else {
       const last = tokens[tokens.length - 1];
       if (last && last.type === "text") {

@@ -90,6 +90,8 @@ export default function PhotosPage() {
   const [creatingFolder, setCreatingFolder] = useState(false);
   const [newFolderName, setNewFolderName] = useState("");
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [isDragOver, setIsDragOver] = useState(false);
+  const dragCounterRef = useRef(0);
   const [sidebarOpen, setSidebarOpen] = useState<boolean>(() => {
     try {
       const v = localStorage.getItem("revision_tracker_photos_sidebar_open");
@@ -433,7 +435,41 @@ export default function PhotosPage() {
           <ChevronRight className="w-4 h-4" />
         </button>
       )}
-      <div className="flex-1 flex flex-col overflow-y-auto">
+      <div
+        className="flex-1 flex flex-col overflow-y-auto relative"
+        onDragEnter={e => {
+          if (!e.dataTransfer.types.includes("Files")) return;
+          e.preventDefault();
+          dragCounterRef.current++;
+          setIsDragOver(true);
+        }}
+        onDragOver={e => {
+          if (!e.dataTransfer.types.includes("Files")) return;
+          e.preventDefault();
+          e.dataTransfer.dropEffect = "copy";
+        }}
+        onDragLeave={() => {
+          dragCounterRef.current--;
+          if (dragCounterRef.current <= 0) {
+            dragCounterRef.current = 0;
+            setIsDragOver(false);
+          }
+        }}
+        onDrop={e => {
+          e.preventDefault();
+          dragCounterRef.current = 0;
+          setIsDragOver(false);
+          if (!showingTrash) handleFiles(e.dataTransfer.files);
+        }}
+      >
+        {isDragOver && !showingTrash && (
+          <div className="absolute inset-0 z-20 flex flex-col items-center justify-center pointer-events-none rounded-none">
+            <div className="absolute inset-3 border-2 border-dashed border-primary rounded-xl bg-primary/5 flex flex-col items-center justify-center gap-3">
+              <Upload className="w-10 h-10 text-primary opacity-70" />
+              <p className="text-sm font-semibold text-primary">Drop photos here to upload</p>
+            </div>
+          </div>
+        )}
       <div className="px-6 py-5 border-b bg-card/50 flex flex-col gap-2">
         <nav
           aria-label="Breadcrumb"

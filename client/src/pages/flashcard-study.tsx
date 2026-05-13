@@ -50,6 +50,55 @@ function readFillBlanksMode(): boolean {
 }
 
 // ---------------------------------------------------------------------------
+// Priority persistence — "again" and "hard" cards are stored per deck so the
+// next study session loads them first.
+// ---------------------------------------------------------------------------
+const PRIORITY_KEY = (deckId: string) => `rt_fc_priority_${deckId}`;
+
+interface DeckPriority { again: string[]; hard: string[] }
+
+function readPriority(deckId: string): DeckPriority {
+  try {
+    const raw = localStorage.getItem(PRIORITY_KEY(deckId));
+    if (raw) return JSON.parse(raw) as DeckPriority;
+  } catch { /* ignore */ }
+  return { again: [], hard: [] };
+}
+
+function writePriority(deckId: string, p: DeckPriority) {
+  try { localStorage.setItem(PRIORITY_KEY(deckId), JSON.stringify(p)); } catch { /* ignore */ }
+}
+
+function addAgainPriority(deckId: string, cardId: string) {
+  const p = readPriority(deckId);
+  if (!p.again.includes(cardId)) p.again = [cardId, ...p.again];
+  p.hard = p.hard.filter(id => id !== cardId);
+  writePriority(deckId, p);
+}
+
+function addHardPriority(deckId: string, cardId: string) {
+  const p = readPriority(deckId);
+  if (p.again.includes(cardId)) return; // "again" outranks "hard"
+  if (!p.hard.includes(cardId)) p.hard = [cardId, ...p.hard];
+  writePriority(deckId, p);
+}
+
+function clearCardPriority(deckId: string, cardId: string) {
+  const p = readPriority(deckId);
+  p.again = p.again.filter(id => id !== cardId);
+  p.hard = p.hard.filter(id => id !== cardId);
+  writePriority(deckId, p);
+}
+
+function sortByPriority(cards: Card[], deckId: string): Card[] {
+  const { again, hard } = readPriority(deckId);
+  const againSet = new Set(again);
+  const hardSet = new Set(hard);
+  const tier = (c: Card) => againSet.has(c.id) ? 0 : hardSet.has(c.id) ? 1 : 2;
+  return [...cards].sort((a, b) => tier(a) - tier(b));
+}
+
+// ---------------------------------------------------------------------------
 // FillBlanksView — renders tokenised card text with interactive input fields.
 // ---------------------------------------------------------------------------
 function FillBlanksView({
@@ -142,12 +191,14 @@ export default function FlashcardStudyPage() {
     if (!user) return;
     jsonFetch<{ cards: Card[] }>(`/api/flashcards/due?deckId=${deckId}&limit=500`)
       .then(j => {
+        // Shuffle within each priority tier so the order is varied but
+        // "again" cards always come before "hard", before everything else.
         const arr = [...j.cards];
         for (let i = arr.length - 1; i > 0; i--) {
           const j2 = Math.floor(Math.random() * (i + 1));
           [arr[i], arr[j2]] = [arr[j2], arr[i]];
         }
-        setQueue(arr);
+        setQueue(sortByPriority(arr, deckId));
       })
       .catch(() => toast({ title: "Could not load due cards", variant: "destructive" }))
       .finally(() => setLoaded(true));
@@ -220,10 +271,21 @@ export default function FlashcardStudyPage() {
       again: s.again + (rating === 1 ? 1 : 0),
       good: s.good + (rating >= 3 ? 1 : 0),
     }));
+    // Persist priority for next session
+    if (rating === 1) addAgainPriority(deckId, current.id);
+    else if (rating === 2) addHardPriority(deckId, current.id);
+    else clearCardPriority(deckId, current.id);
+
     setQueue(q => {
       const [first, ...rest] = q;
       if (rating === 1 && first) {
+        // "Again" — comes back soon in this session (positions 4-6)
         const insertAt = Math.min(rest.length, 4 + Math.floor(Math.random() * 3));
+        return [...rest.slice(0, insertAt), first, ...rest.slice(insertAt)];
+      }
+      if (rating === 2 && first) {
+        // "Hard" — comes back later in this session (positions 8-12)
+        const insertAt = Math.min(rest.length, 8 + Math.floor(Math.random() * 5));
         return [...rest.slice(0, insertAt), first, ...rest.slice(insertAt)];
       }
       return rest;

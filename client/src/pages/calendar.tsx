@@ -22,6 +22,7 @@ import { getExamsOnDate } from "@/lib/exam-dates";
 import { useAuthContext } from "@/lib/auth-context";
 import { useToast } from "@/hooks/use-toast";
 import { useTodoCountsByDeadline, useTodos, updateTodoLocal } from "@/hooks/use-todos";
+import { useEvents } from "@/hooks/use-events";
 import { startOfDay } from "date-fns";
 import { TodoPanel } from "@/components/todo-panel";
 
@@ -42,6 +43,7 @@ export default function CalendarPage() {
   const { data, getDay, updateDay, syncing, synced, uploadedCount } = useRevisionData(user);
   const todoCountsByDate = useTodoCountsByDeadline();
   const allTodos = useTodos();
+  const allEvents = useEvents();
   const todayStart = startOfDay(new Date());
 
   useEffect(() => {
@@ -256,6 +258,7 @@ export default function CalendarPage() {
                 const hasChemistry = !!entry?.subjects?.chemistry && (entry.subjects.chemistry.types.length > 0 || entry.subjects.chemistry.productivity > 0);
                 const hasMaths = !!entry?.subjects?.maths && (entry.subjects.maths.types.length > 0 || entry.subjects.maths.productivity > 0);
                 const examsOnDay = getExamsOnDate(dateStr);
+                const eventsOnDay = allEvents.filter(ev => ev.date === dateStr);
 
                 const SUBJECT_VAR: Record<string, string> = {
                   biology:   "--biology",
@@ -340,6 +343,17 @@ export default function CalendarPage() {
 
                     {/* Indicators */}
                     <div className="flex-1 w-full mt-1 flex flex-col gap-1 overflow-hidden">
+                      {eventsOnDay.map(ev => (
+                        <div
+                          key={ev.id}
+                          className="w-full text-left px-1.5 py-0.5 rounded-md font-semibold text-[10px] md:text-[10.5px] truncate"
+                          style={{ background: `${ev.color === "indigo" ? "hsl(240 60% 58% / 0.15)" : ev.color === "rose" ? "hsl(350 75% 58% / 0.15)" : ev.color === "amber" ? "hsl(40 92% 52% / 0.15)" : `hsl(var(--${ev.color}) / 0.15)`}`, color: ev.color === "indigo" ? "hsl(240 60% 58%)" : ev.color === "rose" ? "hsl(350 75% 58%)" : ev.color === "amber" ? "hsl(40 92% 52%)" : `hsl(var(--${ev.color}))` }}
+                          title={ev.title}
+                        >
+                          📌 {ev.title}
+                        </div>
+                      ))}
+
                       {examsOnDay.map(exam => (
                         <div
                           key={exam.label}

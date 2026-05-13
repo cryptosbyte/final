@@ -3,7 +3,7 @@ import { format, isPast, parseISO, isToday } from "date-fns";
 import { AnimatePresence, motion } from "framer-motion";
 import {
   Plus, Trash2, AlertTriangle, Calendar, Check, X, Pin,
-  ChevronDown, ChevronRight,
+  ChevronDown, ChevronRight, GripVertical,
 } from "lucide-react";
 import {
   notifyTodosChanged,
@@ -316,6 +316,23 @@ export function TodoPanel({ className }: TodoPanelProps) {
     setEditingId(null);
   };
 
+  // ---- Drag-to-reorder (unpinned pending tasks only) ----
+  const [dragId, setDragId] = useState<string | null>(null);
+  const [dragOverId, setDragOverId] = useState<string | null>(null);
+
+  const reorderTodo = (fromId: string, toId: string) => {
+    if (fromId === toId) return;
+    updateTodos(prev => {
+      const arr = [...prev];
+      const fromIdx = arr.findIndex(t => t.id === fromId);
+      const toIdx = arr.findIndex(t => t.id === toId);
+      if (fromIdx < 0 || toIdx < 0) return prev;
+      const [item] = arr.splice(fromIdx, 1);
+      arr.splice(toIdx, 0, item);
+      return arr;
+    });
+  };
+
   // ---- Derived data ----
   const pendingAll = todos.filter(t => !t.completed);
   const subjectCounts = useMemo(() => {
@@ -615,6 +632,19 @@ export function TodoPanel({ className }: TodoPanelProps) {
               deleteTodo={deleteTodo}
               togglePin={togglePin}
               openEditor={openEditor}
+              canReorder
+              isDragOver={dragOverId === todo.id}
+              onReorderDragStart={() => setDragId(todo.id)}
+              onReorderDragEnter={() => setDragOverId(todo.id)}
+              onReorderDrop={() => {
+                if (dragId && dragId !== todo.id) reorderTodo(dragId, todo.id);
+                setDragId(null);
+                setDragOverId(null);
+              }}
+              onReorderDragEnd={() => {
+                setDragId(null);
+                setDragOverId(null);
+              }}
             />
           ))}
 
@@ -734,6 +764,12 @@ interface TaskRowProps {
   deleteTodo: (id: string) => void;
   togglePin: (id: string) => void;
   openEditor: (t: TodoItem) => void;
+  canReorder?: boolean;
+  isDragOver?: boolean;
+  onReorderDragStart?: () => void;
+  onReorderDragEnter?: () => void;
+  onReorderDrop?: () => void;
+  onReorderDragEnd?: () => void;
 }
 
 function TaskRow(p: TaskRowProps) {
@@ -758,6 +794,11 @@ function TaskRow(p: TaskRowProps) {
         background: "hsl(var(--secondary) / 0.6)",
         border: "1px solid hsl(var(--border))",
       }
+    : p.isDragOver
+    ? {
+        background: "hsl(var(--primary) / 0.06)",
+        border: "1px solid hsl(var(--primary) / 0.40)",
+      }
     : {
         background: "transparent",
         border: "1px solid transparent",
@@ -768,8 +809,39 @@ function TaskRow(p: TaskRowProps) {
       className="rounded-2xl group transition-all duration-150 hover:bg-secondary/40 hover:translate-x-0.5 hover:shadow-sm"
       style={containerStyle}
       data-testid={`todo-item-${todo.id}`}
+      draggable={p.canReorder && !isEditing}
+      onDragStart={e => {
+        if (!p.canReorder) return;
+        e.dataTransfer.effectAllowed = "move";
+        e.dataTransfer.setData("text/plain", todo.id);
+        p.onReorderDragStart?.();
+      }}
+      onDragEnter={e => {
+        if (!p.canReorder) return;
+        e.preventDefault();
+        p.onReorderDragEnter?.();
+      }}
+      onDragOver={e => {
+        if (!p.canReorder) return;
+        e.preventDefault();
+        e.dataTransfer.dropEffect = "move";
+      }}
+      onDrop={e => {
+        if (!p.canReorder) return;
+        e.preventDefault();
+        p.onReorderDrop?.();
+      }}
+      onDragEnd={() => p.onReorderDragEnd?.()}
     >
       <div className="flex items-start gap-2.5 py-2.5 px-3">
+        {p.canReorder && !isEditing && (
+          <span
+            className="mt-1 shrink-0 text-muted-foreground/30 group-hover:text-muted-foreground/60 cursor-grab active:cursor-grabbing transition-colors"
+            title="Drag to reorder"
+          >
+            <GripVertical className="w-3.5 h-3.5" />
+          </span>
+        )}
         <button
           onClick={() => p.completeTodo(todo.id)}
           data-testid={`todo-check-${todo.id}`}

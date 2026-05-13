@@ -1,5 +1,6 @@
 import { useState, useMemo } from "react";
-import { format, parseISO, startOfMonth, endOfMonth, isWithinInterval, startOfWeek, endOfWeek, eachDayOfInterval, differenceInCalendarDays, subDays, addDays } from "date-fns";
+import { format, parseISO, startOfMonth, endOfMonth, isWithinInterval, startOfWeek, endOfWeek, eachDayOfInterval, differenceInCalendarDays, subDays, addDays, isToday } from "date-fns";
+import { useTodos } from "@/hooks/use-todos";
 import { getNextExamForSubject, ExamSubject, EXAM_DATES } from "@/lib/exam-dates";
 import { Flame, BarChart3 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -587,7 +588,8 @@ function SubjectBalanceSection({ data }: { data: ReturnType<typeof useRevisionDa
 // 3-month heatmap (Apr–Jun 2026)
 // ─────────────────────────────────────────────────────────────────────────────
 
-function ThreeMonthHeatmap({ data }: { data: ReturnType<typeof useRevisionData>["data"] }) {
+function ThreeMonthHeatmap({ data, todayBonus = 0 }: { data: ReturnType<typeof useRevisionData>["data"]; todayBonus?: number }) {
+  const todayKey = format(new Date(), "yyyy-MM-dd");
   const { weeks, maxScore, totalActiveDays, examDateSet } = useMemo(() => {
     const start = new Date(2026, 3, 1); // 1 Apr 2026
     const end = new Date(2026, 5, 30);  // 30 Jun 2026
@@ -605,7 +607,7 @@ function ThreeMonthHeatmap({ data }: { data: ReturnType<typeof useRevisionData>[
     allDays.forEach((d, idx) => {
       const key = format(d, "yyyy-MM-dd");
       const inRange = isWithinInterval(d, { start, end });
-      const score = inRange ? dayActivityScore(data[key], key) : 0;
+      const score = inRange ? dayActivityScore(data[key], key) + (key === todayKey ? todayBonus : 0) : 0;
       if (score > 0) totalActiveDays++;
       if (score > maxScore) maxScore = score;
       week.push({ date: d, key, inRange, score, isExam: inRange && examDateSet.has(key) });
@@ -1200,6 +1202,14 @@ export default function StatsPage() {
   const { user, isLoading: authLoading, login } = useAuthContext();
   const { data, syncing, synced } = useRevisionData(user);
   const isInitialLoading = !!user && syncing && !synced;
+  const todos = useTodos();
+  const todayCompletedBonus = useMemo(() => {
+    const todayStr = format(new Date(), "yyyy-MM-dd");
+    const count = todos.filter(t =>
+      t.completed && t.completedAt && t.completedAt.startsWith(todayStr)
+    ).length;
+    return count * 0.5;
+  }, [todos]);
   const [selectedMonth, setSelectedMonth] = useState(() => {
     const now = new Date();
     // Stats only covers Apr–Jun 2026. Snap to current month when in range, otherwise April 2026.
@@ -1317,7 +1327,7 @@ export default function StatsPage() {
 
       <SubjectBalanceSection data={data} />
 
-      <ThreeMonthHeatmap data={data} />
+      <ThreeMonthHeatmap data={data} todayBonus={todayCompletedBonus} />
 
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 max-w-6xl mx-auto">
         <div>
