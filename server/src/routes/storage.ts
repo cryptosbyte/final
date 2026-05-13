@@ -1,20 +1,58 @@
 import { Router, type IRouter, type Request, type Response } from "express";
 import { Readable } from "stream";
+import multer from "multer";
 import {
   RequestUploadUrlBody,
-  RequestUploadUrlResponse,
 } from "../shared/api";
 import { ObjectStorageService, ObjectNotFoundError } from "../lib/objectStorage";
 
 const router: IRouter = Router();
 const objectStorageService = new ObjectStorageService();
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } });
+
+/**
+ * POST /storage/uploads/upload
+ *
+ * Multipart upload endpoint — client sends the file directly to the server,
+ * server streams it to Cloudflare R2. Avoids any CORS issues with R2.
+ */
+router.post(
+  "/storage/uploads/upload",
+  (req: Request, res: Response, next) => {
+    if (!req.isAuthenticated()) {
+      res.status(401).json({ error: "Unauthorized" });
+      return;
+    }
+    next();
+  },
+  upload.single("file"),
+  async (req: Request, res: Response) => {
+    try {
+      if (!req.file) {
+        res.status(400).json({ error: "No file provided" });
+        return;
+      }
+
+      const { originalname, mimetype, buffer } = req.file;
+      const { objectPath } = await objectStorageService.uploadObject(
+        buffer,
+        mimetype,
+        originalname,
+      );
+
+      res.json({ objectPath });
+    } catch (error) {
+      req.log.error({ err: error }, "Error uploading file");
+      res.status(500).json({ error: "Failed to upload file" });
+    }
+  },
+);
 
 /**
  * POST /storage/uploads/request-url
  *
- * Request a presigned URL for file upload.
- * The client sends JSON metadata (name, size, contentType) — NOT the file.
- * Then uploads the file directly to the returned presigned URL.
+ * Kept for backward compatibility — now returns a server-side upload URL
+ * instead of a presigned R2 URL (avoids CORS).
  */
 router.post("/storage/uploads/request-url", async (req: Request, res: Response) => {
   if (!req.isAuthenticated()) {
@@ -29,63 +67,24 @@ router.post("/storage/uploads/request-url", async (req: Request, res: Response) 
 
   try {
     const { name, size, contentType } = parsed.data;
+    const reservedPath = objectStorageService.reserveObjectPath();
 
-    const uploadURL = await objectStorageService.getObjectEntityUploadURL();
-    const objectPath = objectStorageService.normalizeObjectEntityPath(uploadURL);
-
-    res.json(
-      RequestUploadUrlResponse.parse({
-        uploadURL,
-        objectPath,
-        metadata: { name, size, contentType },
-      }),
-    );
+    res.json({
+      uploadURL: null,
+      objectPath: reservedPath,
+      useDirectUpload: true,
+      metadata: { name, size, contentType },
+    });
   } catch (error) {
-    req.log.error({ err: error }, "Error generating upload URL");
-    res.status(500).json({ error: "Failed to generate upload URL" });
-  }
-});
-
-/**
- * GET /storage/public-objects/*
- *
- * Serve public assets from PUBLIC_OBJECT_SEARCH_PATHS.
- * These are unconditionally public — no authentication or ACL checks.
- * IMPORTANT: Always provide this endpoint when object storage is set up.
- */
-router.get("/storage/public-objects/*filePath", async (req: Request, res: Response) => {
-  try {
-    const raw = req.params.filePath;
-    const filePath = Array.isArray(raw) ? raw.join("/") : raw;
-    const file = await objectStorageService.searchPublicObject(filePath);
-    if (!file) {
-      res.status(404).json({ error: "File not found" });
-      return;
-    }
-
-    const response = await objectStorageService.downloadObject(file);
-
-    res.status(response.status);
-    response.headers.forEach((value, key) => res.setHeader(key, value));
-
-    if (response.body) {
-      const nodeStream = Readable.fromWeb(response.body as ReadableStream<Uint8Array>);
-      nodeStream.pipe(res);
-    } else {
-      res.end();
-    }
-  } catch (error) {
-    req.log.error({ err: error }, "Error serving public object");
-    res.status(500).json({ error: "Failed to serve public object" });
+    req.log.error({ err: error }, "Error reserving object path");
+    res.status(500).json({ error: "Failed to reserve object path" });
   }
 });
 
 /**
  * GET /storage/objects/*
  *
- * Serve object entities from PRIVATE_OBJECT_DIR.
- * These are served from a separate path from /public-objects and can optionally
- * be protected with authentication or ACL checks based on the use case.
+ * Stream an object from R2 for authenticated users.
  */
 router.get("/storage/objects/*path", async (req: Request, res: Response) => {
   if (!req.isAuthenticated()) {
@@ -118,6 +117,14 @@ router.get("/storage/objects/*path", async (req: Request, res: Response) => {
     req.log.error({ err: error }, "Error serving object");
     res.status(500).json({ error: "Failed to serve object" });
   }
+});
+
+/**
+ * GET /storage/public-objects/*
+ * Kept for compatibility.
+ */
+router.get("/storage/public-objects/*filePath", async (_req: Request, res: Response) => {
+  res.status(404).json({ error: "File not found" });
 });
 
 export default router;

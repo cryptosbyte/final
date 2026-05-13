@@ -232,27 +232,26 @@ export default function PhotosPage() {
 
   const uploadOne = async (file: File): Promise<Photo | null> => {
     try {
-      const presign = await jsonFetch<{ uploadURL: string; objectPath: string }>(
-        "/api/storage/uploads/request-url",
-        {
-          method: "POST",
-          body: JSON.stringify({ name: file.name, size: file.size, contentType: file.type || "application/octet-stream" }),
-        },
-      );
+      const formData = new FormData();
+      formData.append("file", file);
 
-      const putRes = await fetch(presign.uploadURL, {
-        method: "PUT",
-        body: file,
-        headers: { "Content-Type": file.type || "application/octet-stream" },
+      const uploadRes = await fetch("/api/storage/uploads/upload", {
+        method: "POST",
+        credentials: "include",
+        body: formData,
       });
-      if (!putRes.ok) throw new Error(`Upload failed: ${putRes.status}`);
+      if (!uploadRes.ok) {
+        const text = await uploadRes.text().catch(() => "");
+        throw new Error(text || `Upload failed: ${uploadRes.status}`);
+      }
+      const { objectPath } = await uploadRes.json() as { objectPath: string };
 
       return await jsonFetch<Photo>("/api/photos", {
         method: "POST",
         body: JSON.stringify({
           folderId: currentFolderId,
           name: file.name,
-          objectPath: presign.objectPath,
+          objectPath,
           contentType: file.type || "application/octet-stream",
           size: file.size,
         }),
