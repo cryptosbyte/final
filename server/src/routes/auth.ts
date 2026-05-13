@@ -111,14 +111,13 @@ router.get("/callback", async (req: Request, res: Response) => {
   res.clearCookie("oauth_state", { path: "/" });
 
   if (!code || !state || !savedState || state !== savedState) {
-    res.redirect("/api/login");
+    res.status(400).json({ error: "Invalid OAuth state or missing code" });
     return;
   }
 
   const returnTo = getSafeReturnTo((state as string).split("|")[0]);
   const callbackUrl = `${getOrigin(req)}/api/callback`;
 
-  // Exchange code for access token
   let accessToken: string;
   try {
     const tokenRes = await fetch("https://github.com/login/oauth/access_token", {
@@ -135,24 +134,26 @@ router.get("/callback", async (req: Request, res: Response) => {
       }),
     });
 
-    if (!tokenRes.ok) throw new Error(`Token exchange failed: ${tokenRes.status}`);
-    const tokenData = (await tokenRes.json()) as { access_token?: string; error?: string };
+    if (!tokenRes.ok) {
+      const tokenText = await tokenRes.text();
+      throw new Error(`Token exchange failed: ${tokenRes.status} ${tokenText}`);
+    }
+    const tokenData = (await tokenRes.json()) as { access_token?: string; error?: string; error_description?: string };
 
     if (tokenData.error || !tokenData.access_token) {
-      throw new Error(tokenData.error ?? "No access token received");
+      throw new Error(tokenData.error_description ?? tokenData.error ?? "No access token received");
     }
     accessToken = tokenData.access_token;
-  } catch {
-    res.redirect("/api/login");
+  } catch (err) {
+    res.status(500).json({ error: "GitHub OAuth token exchange failed" });
     return;
   }
 
-  // Fetch GitHub user info
   let githubUser: Awaited<ReturnType<typeof fetchGitHubUser>>;
   try {
     githubUser = await fetchGitHubUser(accessToken);
   } catch {
-    res.redirect("/api/login");
+    res.status(500).json({ error: "GitHub user fetch failed" });
     return;
   }
 

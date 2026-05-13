@@ -42,12 +42,16 @@ app.use(authMiddleware);
 
 app.use("/api", router);
 
-// Serve static frontend in production
 if (process.env.NODE_ENV === "production") {
   const clientDist = path.resolve(__dirname, "../client-dist");
+  const indexHtml = path.join(clientDist, "index.html");
   app.use(express.static(clientDist));
-  app.get("/{*path}", (_req, res) => {
-    res.sendFile(path.join(clientDist, "index.html"));
+  app.get("/{*path}", (req, res, next) => {
+    if (req.originalUrl.startsWith("/api/")) {
+      next();
+      return;
+    }
+    res.sendFile(indexHtml);
   });
 }
 
