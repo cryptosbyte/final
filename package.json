@@ -3,8 +3,11 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
-    "dev": "concurrently --kill-others \"npm run dev:server\" \"npm run dev:client\"",
+    "dev": "sh -c 'npm run dev:server & npm run dev:client; wait'",
     "dev:server": "NODE_ENV=development PORT=3001 tsx watch server/src/index.ts",
     "dev:client": "vite --config vite.config.ts --host 0.0.0.0",
     "build": "node build.mjs",
@@ -67,7 +70,6 @@
     "@radix-ui/react-toggle-group": "^1.1.3",
     "@radix-ui/react-tooltip": "^1.2.0",
     "@tailwindcss/typography": "^0.5.15",
-    "@tailwindcss/vite": "^4.1.14",
     "@tanstack/react-query": "^5.90.21",
     "@types/adm-zip": "^0.5.7",
     "@types/cookie-parser": "^1.4.10",
@@ -83,7 +85,6 @@
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "cmdk": "^1.1.1",
-    "concurrently": "^9.1.2",
     "date-fns": "^3.6.0",
     "drizzle-kit": "^0.31.1",
     "embla-carousel-react": "^8.6.0",

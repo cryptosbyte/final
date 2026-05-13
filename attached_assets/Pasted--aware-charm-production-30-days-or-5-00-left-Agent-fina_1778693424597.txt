@@ -1,0 +1,213 @@
+
+
+aware-charm
+
+production
+
+
+
+30 days or $5.00 left
+
+Agent
+
+
+final
+Deployments
+Variables
+Metrics
+Settings
+Unexposed service
+US West
+1 Replica
+
+HISTORY
+Hide Skipped
+final
+/
+a0436c46
+Failed
+
+May 13, 2026 at 6:28 PM GMT+1
+Get Help
+Details
+Build Logs
+Deploy Logs
+Network Flow Logs
+Agent usage limit reached. Raise your limit to diagnose why this deployment failed.
+
+Update limit
+Search build logs
+
+You reached the start of the range
+May 13, 2026 at 6:23 PM
+
+stage-0
+FROM ghcr.io/railwayapp/nixpacks:ubuntu-1745885067@sha256:d45c89d80e13d7ad0fd555b5130f22a866d9dd10e861f589932303ef2314c7de
+36ms
+
+stage-0
+WORKDIR /app/ cached
+0ms
+scheduling build on Metal builder "production-builderv3-us-west1-zg9b"
+unpacking archive
+1.3 MB
+5ms
+using build driver nixpacks-v1.41.0
+uploading snapshot
+268.2 KB
+33ms
+ 
+╔═════════════════════ Nixpacks v1.41.0 ═════════════════════╗
+║ setup      │ nodejs_18, npm-9_x, openssl                   ║
+║────────────────────────────────────────────────────────────║
+║ caddy      │ pkgs: caddy                                   ║
+║            │ cmds: caddy fmt --overwrite /assets/Caddyfile ║
+║────────────────────────────────────────────────────────────║
+║ install    │ npm ci                                        ║
+║────────────────────────────────────────────────────────────║
+║ build      │ npm install && npm run build                  ║
+║────────────────────────────────────────────────────────────║
+║ start      │ npm run start                                 ║
+╚════════════════════════════════════════════════════════════╝
+ 
+ 
+Saved output to:
+  snapshot-target-unpack
+
+internal
+load build definition from Dockerfile
+0ms
+
+internal
+load metadata for ghcr.io/railwayapp/nixpacks:ubuntu-1745885067
+374ms
+
+internal
+load .dockerignore
+0ms
+SecretsUsedInArgOrEnv: Do not use ARG or ENV instructions for sensitive data (ARG "GITHUB_CLIENT_SECRET") (line 13)(https://docs.docker.com/go/dockerfile/rule/secrets-used-in-arg-or-env/)
+ details: Sensitive data should not be used in the ARG or ENV commands
+SecretsUsedInArgOrEnv: Do not use ARG or ENV instructions for sensitive data (ENV "GITHUB_CLIENT_SECRET") (line 14)(https://docs.docker.com/go/dockerfile/rule/secrets-used-in-arg-or-env/)
+ details: Sensitive data should not be used in the ARG or ENV commands
+UndefinedVar: Usage of undefined variable '$NIXPACKS_PATH' (line 24)(https://docs.docker.com/go/dockerfile/rule/undefined-var/)
+ details: Variables should be defined before their use
+
+internal
+load build context
+0ms
+
+stage-0
+COPY .nixpacks/assets /assets/ cached
+0ms
+
+stage-0
+COPY .nixpacks/nixpkgs-ffeebf0acf3ae8b29f8c7049cd911b9636efd7e7.nix .nixpacks/nixpkgs-ffeebf0acf3ae8b29f8c7049cd911b9636efd7e7.nix cached
+0ms
+
+stage-0
+COPY .nixpacks/nixpkgs-ba913eda2df8eb72147259189d55932012df6301.nix .nixpacks/nixpkgs-ba913eda2df8eb72147259189d55932012df6301.nix cached
+0ms
+
+stage-0
+RUN nix-env -if .nixpacks/nixpkgs-ba913eda2df8eb72147259189d55932012df6301.nix && nix-collect-garbage -d cached
+0ms
+
+stage-0
+RUN nix-env -if .nixpacks/nixpkgs-ffeebf0acf3ae8b29f8c7049cd911b9636efd7e7.nix && nix-collect-garbage -d cached
+0ms
+
+stage-0
+COPY . /app/.
+106ms
+
+stage-0
+RUN  caddy fmt --overwrite /assets/Caddyfile
+403ms
+
+stage-0
+COPY . /app/.
+229ms
+
+stage-0
+RUN npm ci
+11s
+Run `npm audit` for details.
+
+stage-0
+COPY . /app/.
+229ms
+
+stage-0
+RUN npm install && npm run build
+3s
+npm warn EBADENGINE Unsupported engine {
+npm warn EBADENGINE   package: '@tailwindcss/oxide@4.3.0',
+npm warn EBADENGINE   required: { node: '>= 20' },
+npm warn EBADENGINE   current: { node: 'v18.20.5', npm: '10.8.2' }
+npm warn EBADENGINE }
+npm warn EBADENGINE Unsupported engine {
+npm warn EBADENGINE   package: '@vitejs/plugin-react@5.2.0',
+npm warn EBADENGINE   required: { node: '^20.19.0 || >=22.12.0' },
+npm warn EBADENGINE   current: { node: 'v18.20.5', npm: '10.8.2' }
+npm warn EBADENGINE }
+npm warn EBADENGINE Unsupported engine {
+npm warn EBADENGINE   package: 'vite@7.3.3',
+npm warn EBADENGINE   required: { node: '^20.19.0 || >=22.12.0' },
+npm warn EBADENGINE   current: { node: 'v18.20.5', npm: '10.8.2' }
+npm warn EBADENGINE }
+up to date, audited 635 packages in 2s
+187 packages are looking for funding
+  run `npm fund` for details
+9 vulnerabilities (5 low, 4 moderate)
+To address all issues (including breaking changes), run:
+  npm audit fix --force
+Run `npm audit` for details.
+> revision-dashboard@1.0.0 build
+> node build.mjs
+Building client...
+failed to load config from /app/vite.config.ts
+Error: Cannot find native binding. npm has a bug related to optional dependencies (https://github.com/npm/cli/issues/4828). Please try `npm i` again after removing both package-lock.json and node_modules directory.
+    at Object.<anonymous> (/app/node_modules/@tailwindcss/oxide/index.js:563:11)
+    at Module._compile (node:internal/modules/cjs/loader:1364:14)
+    ... 2 lines matching cause stack trace ...
+    at Module._load (node:internal/modules/cjs/loader:1019:12)
+    at ModuleWrap.<anonymous> (node:internal/modules/esm/translators:203:29)
+    at ModuleJob.run (node:internal/modules/esm/module_job:195:25)
+    at async ModuleLoader.import (node:internal/modules/esm/loader:337:24)
+    at async loadConfigFromBundledFile (file:///app/node_modules/vite/dist/node/chunks/config.js:35936:12)
+    at async bundleAndLoadConfigFile (file:///app/node_modules/vite/dist/node/chunks/config.js:35824:17) {
+  [cause]: Error: Cannot find module '@tailwindcss/oxide-linux-x64-gnu'
+  Require stack:
+  - /app/node_modules/@tailwindcss/oxide/index.js
+      at Module._resolveFilename (node:internal/modules/cjs/loader:1140:15)
+      ... 2 lines matching cause stack trace ...
+      at require (node:internal/modules/helpers:177:18)
+      at requireNative (/app/node_modules/@tailwindcss/oxide/index.js:288:27)
+      at Object.<anonymous> (/app/node_modules/@tailwindcss/oxide/index.js:526:17)
+      at Module._compile (node:internal/modules/cjs/loader:1364:14)
+      at Module._extensions..js (node:internal/modules/cjs/loader:1422:10)
+      at Module.load (node:internal/modules/cjs/loader:1203:32)
+      at Module._load (node:internal/modules/cjs/loader:1019:12) {
+    code: 'MODULE_NOT_FOUND',
+    requireStack: [ '/app/node_modules/@tailwindcss/oxide/index.js' ],
+    cause: Error: Cannot find module './tailwindcss-oxide.linux-x64-gnu.node'
+    Require stack:
+    - /app/node_modules/@tailwindcss/oxide/index.js
+        at Module._resolveFilename (node:internal/modules/cjs/loader:1140:15)
+        at Module._load (node:internal/modules/cjs/loader:981:27)
+        at Module.require (node:internal/modules/cjs/loader:1231:19)
+        at require (node:internal/modules/helpers:177:18)
+        at requireNative (/app/node_modules/@tailwindcss/oxide/index.js:283:18)
+        at Object.<anonymous> (/app/node_modules/@tailwindcss/oxide/index.js:526:17)
+        at Module._compile (node:internal/modules/cjs/loader:1364:14)
+        at Module._extensions..js (node:internal/modules/cjs/loader:1422:10)
+        at Module.load (node:internal/modules/cjs/loader:1203:32)
+        at Module._load (node:internal/modules/cjs/loader:1019:12) {
+      code: 'MODULE_NOT_FOUND',
+      requireStack: [Array]
+    }
+  }
+}
+Build Failed: build daemon returned an error < failed to solve: process "/bin/bash -ol pipefail -c npm install && npm run build" did not complete successfully: exit code: 1 >
+
+

@@ -3,7 +3,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { build as esbuild } from "esbuild";
 import esbuildPluginPino from "esbuild-plugin-pino";
-import { rm, copyFile, mkdir } from "node:fs/promises";
+import { rm, copyFile } from "node:fs/promises";
 import { build as viteBuild } from "vite";
 
 globalThis.require = createRequire(import.meta.url);
@@ -128,21 +128,11 @@ globalThis.__dirname = __bannerPath.dirname(globalThis.__filename);
     },
   });
 
-  // Copy sql-wasm.wasm for anki importer
   try {
-    const ankiRequire = createRequire(
-      path.resolve(__dirname, "server/src/anki/index.ts"),
-    );
-    const wasmSrc = ankiRequire.resolve("sql.js/dist/sql-wasm.wasm");
+    const wasmSrc = createRequire(import.meta.url).resolve("sql.js/dist/sql-wasm.wasm");
     await copyFile(wasmSrc, path.join(distDir, "sql-wasm.wasm"));
   } catch {
-    // sql.js wasm may be resolved from node_modules
-    try {
-      const wasmSrc = createRequire(import.meta.url).resolve("sql.js/dist/sql-wasm.wasm");
-      await copyFile(wasmSrc, path.join(distDir, "sql-wasm.wasm"));
-    } catch {
-      console.warn("Could not copy sql-wasm.wasm — anki import may not work");
-    }
+    console.warn("Could not copy sql-wasm.wasm — anki import may not work");
   }
 
   console.log("Server built.");
