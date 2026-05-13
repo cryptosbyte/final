@@ -16,6 +16,8 @@
     "db:studio": "drizzle-kit studio"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.1045.0",
+    "@aws-sdk/s3-request-presigner": "^3.1045.0",
     "@google-cloud/storage": "^7.19.0",
     "@tailwindcss/vite": "^4.3.0",
     "adm-zip": "^0.5.16",
