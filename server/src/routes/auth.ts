@@ -170,9 +170,12 @@ router.get("/callback", async (req: Request, res: Response) => {
       githubUser.name,
       githubUser.avatar_url,
     );
-  } catch (err) {
+  } catch (err: unknown) {
+    const detail = err instanceof Error
+      ? `${err.message}${err.cause ? ` | cause: ${String(err.cause)}` : ""}`
+      : String(err);
     console.error("Failed to upsert user:", err);
-    res.status(500).json({ error: "Failed to save user to database", detail: String(err) });
+    res.status(500).json({ error: "Failed to save user to database", detail });
     return;
   }
 
