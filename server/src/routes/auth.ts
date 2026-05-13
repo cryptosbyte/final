@@ -162,12 +162,19 @@ router.get("/callback", async (req: Request, res: Response) => {
     email = await fetchGitHubUserEmail(accessToken);
   }
 
-  const dbUser = await upsertUser(
-    String(githubUser.id),
-    email,
-    githubUser.name,
-    githubUser.avatar_url,
-  );
+  let dbUser: Awaited<ReturnType<typeof upsertUser>>;
+  try {
+    dbUser = await upsertUser(
+      String(githubUser.id),
+      email,
+      githubUser.name,
+      githubUser.avatar_url,
+    );
+  } catch (err) {
+    console.error("Failed to upsert user:", err);
+    res.status(500).json({ error: "Failed to save user to database", detail: String(err) });
+    return;
+  }
 
   const sessionData: SessionData = {
     user: {
@@ -179,7 +186,15 @@ router.get("/callback", async (req: Request, res: Response) => {
     },
   };
 
-  const sid = await createSession(sessionData);
+  let sid: string;
+  try {
+    sid = await createSession(sessionData);
+  } catch (err) {
+    console.error("Failed to create session:", err);
+    res.status(500).json({ error: "Failed to create session", detail: String(err) });
+    return;
+  }
+
   setSessionCookie(res, sid);
   res.redirect(returnTo);
 });
