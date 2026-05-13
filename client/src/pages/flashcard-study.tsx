@@ -8,6 +8,7 @@ import { useIsMobile } from "@/hooks/use-mobile";
 import { MarkdownPreview } from "@/components/markdown-editor";
 import { renderCloze } from "@/lib/cloze";
 import { recordFlashcardStudyTime } from "@/lib/flashcard-day-time";
+import { buildFillTokens, checkAnswer, type FillToken } from "@/lib/fill-blanks";
 
 interface Card {
   id: string;
@@ -22,13 +23,8 @@ interface Card {
   dueAt: string;
 }
 
-/**
- * Snapshot we capture *before* sending a review, so the Undo button can
- * restore both the card's SR state on the server and the local queue.
- */
 interface ReviewHistoryEntry {
   card: Card;
-  /** Index in the queue at the time the card was shown (always 0 here). */
   queueLength: number;
 }
 
@@ -49,6 +45,59 @@ const RATING_LABELS = [
   { rating: 4, label: "Easy",  hint: "Trivially easy",         color: "bg-blue-500 hover:bg-blue-600", key: "4" },
 ] as const;
 
+function readFillBlanksMode(): boolean {
+  try { return localStorage.getItem("revision_tracker_fill_blanks_mode") === "1"; } catch { return false; }
+}
+
+// ---------------------------------------------------------------------------
+// FillBlanksView — renders tokenised card text with interactive input fields.
+// ---------------------------------------------------------------------------
+function FillBlanksView({
+  tokens,
+  inputs,
+  checked,
+  results,
+  onChange,
+}: {
+  tokens: FillToken[];
+  inputs: string[];
+  checked: boolean;
+  results: boolean[];
+  onChange: (idx: number, val: string) => void;
+}) {
+  return (
+    <div className="leading-loose text-base text-foreground whitespace-pre-wrap font-normal">
+      {tokens.map((t, i) => {
+        if (t.type === "text") {
+          return <span key={i}>{t.value}</span>;
+        }
+        const val = inputs[t.blankIndex] ?? "";
+        const correct = checked ? results[t.blankIndex] : undefined;
+        return (
+          <input
+            key={i}
+            type="text"
+            value={val}
+            onChange={e => onChange(t.blankIndex, e.target.value)}
+            disabled={checked}
+            spellCheck={false}
+            autoComplete="off"
+            className={[
+              "inline-block mx-0.5 bg-transparent border-b-2 outline-none text-center align-baseline transition-colors",
+              checked
+                ? correct
+                  ? "border-emerald-500 text-emerald-600 dark:text-emerald-400"
+                  : "border-red-500 text-red-500 dark:text-red-400"
+                : "border-foreground/30 focus:border-primary",
+            ].join(" ")}
+            style={{ width: Math.max(44, t.value.length * 10) + "px" }}
+          />
+        );
+      })}
+    </div>
+  );
+}
+
 export default function FlashcardStudyPage() {
   const params = useParams<{ id: string }>();
   const deckId = params.id!;
@@ -62,11 +111,18 @@ export default function FlashcardStudyPage() {
   const [history, setHistory] = useState<ReviewHistoryEntry[]>([]);
   const [stats, setStats] = useState({ done: 0, again: 0, good: 0 });
   const [deckSubject, setDeckSubject] = useState<string>("");
+  const [deckName, setDeckName] = useState<string>("");
   const [isLandscape, setIsLandscape] = useState<boolean>(() =>
     typeof window === "undefined" ? true : window.innerWidth >= window.innerHeight,
   );
+
+  // Fill-in-the-blanks mode (global setting read from localStorage).
+  const [fillBlanksMode] = useState<boolean>(readFillBlanksMode);
+  const [blankInputs, setBlankInputs] = useState<string[]>([]);
+  const [blankChecked, setBlankChecked] = useState(false);
+  const [blankResults, setBlankResults] = useState<boolean[]>([]);
+
   const startRef = useRef<number>(Date.now());
-  /** Cumulative time spent in this session, in ms. */
   const sessionMsRef = useRef<number>(0);
 
   const current = queue[0];
@@ -75,6 +131,12 @@ export default function FlashcardStudyPage() {
     () => current?.type === "cloze" ? renderCloze(current.front) : null,
     [current],
   );
+
+  // Build fill-blank tokens whenever the current card changes (basic cards only).
+  const fillTokenData = useMemo(() => {
+    if (!fillBlanksMode || !current || current.type !== "basic") return null;
+    return buildFillTokens(current.front, current.back ?? "");
+  }, [fillBlanksMode, current?.id, current?.type]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (!user) return;
@@ -89,21 +151,20 @@ export default function FlashcardStudyPage() {
       })
       .catch(() => toast({ title: "Could not load due cards", variant: "destructive" }))
       .finally(() => setLoaded(true));
-    // Fetch deck metadata so we know which subject the time should count
-    // toward on today's calendar entry.
-    jsonFetch<{ subject?: string }>(`/api/flashcard-decks/${deckId}`)
-      .then(j => { if (j.subject) setDeckSubject(j.subject); })
+    jsonFetch<{ subject?: string; name?: string }>(`/api/flashcard-decks/${deckId}`)
+      .then(j => {
+        if (j.subject) setDeckSubject(j.subject);
+        if (j.name) setDeckName(j.name);
+      })
       .catch(() => { /* non-fatal */ });
   }, [user, deckId, toast]);
 
-  // Watch screen orientation on mobile; the study UI requires landscape.
   useEffect(() => {
     if (typeof window === "undefined") return;
     const update = () => setIsLandscape(window.innerWidth >= window.innerHeight);
     update();
     window.addEventListener("resize", update);
     window.addEventListener("orientationchange", update);
-    // Best-effort: try to lock orientation on mobile (Chrome/Android only).
     if (isMobile) {
       const so = (screen as Screen & { orientation?: ScreenOrientation & { lock?: (o: string) => Promise<void> } }).orientation;
       so?.lock?.("landscape").catch(() => { /* often blocked, that's fine */ });
@@ -114,23 +175,32 @@ export default function FlashcardStudyPage() {
     };
   }, [isMobile]);
 
+  // Reset per-card state when the card changes.
   useEffect(() => {
     startRef.current = Date.now();
     setRevealed(false);
+    setBlankChecked(false);
+    setBlankResults([]);
+    setBlankInputs([]);
   }, [current?.id]);
+
+  // Keep blankInputs length in sync with answers array length.
+  useEffect(() => {
+    if (!fillTokenData) return;
+    setBlankInputs(Array(fillTokenData.answers.length).fill(""));
+  }, [fillTokenData]);
 
   async function rate(rating: 1 | 2 | 3 | 4) {
     if (!current) return;
     const snapshot: ReviewHistoryEntry = { card: { ...current }, queueLength: queue.length };
     const durationMs = Date.now() - startRef.current;
     const dateKey = format(new Date(), "yyyy-MM-dd");
-    // Cap each card at 5 minutes — guards against tabs left open overnight
-    // inflating today's productivity score.
     sessionMsRef.current += Math.min(durationMs, 5 * 60 * 1000);
     if (deckSubject) {
       recordFlashcardStudyTime({
         deckId,
         deckSubject,
+        deckName: deckName || undefined,
         totalSessionMs: sessionMsRef.current,
         loggedIn: !!user,
       });
@@ -179,18 +249,18 @@ export default function FlashcardStudyPage() {
       toast({ title: "Could not undo on server (going back locally)", variant: "destructive" });
     }
     setHistory(h => h.slice(0, -1));
-    setStats(s => ({
-      done: Math.max(0, s.done - 1),
-      // We don't know which counter to decrement without storing the rating;
-      // recompute conservatively. (Rare edge case — keep state simple.)
-      again: s.again,
-      good: s.good,
-    }));
-    // Put the previous card back at the front of the queue. If the previous
-    // rating had re-queued it (Again), there may be a duplicate further down;
-    // we leave it because it'll be re-rated and converge.
+    setStats(s => ({ done: Math.max(0, s.done - 1), again: s.again, good: s.good }));
     setQueue(q => [last.card, ...q.filter(c => c.id !== last.card.id)]);
     setRevealed(false);
+  }
+
+  function checkBlanks() {
+    if (!fillTokenData) return;
+    const results = fillTokenData.answers.map((ans, i) =>
+      checkAnswer(blankInputs[i] ?? "", ans),
+    );
+    setBlankResults(results);
+    setBlankChecked(true);
   }
 
   // Keyboard shortcuts.
@@ -198,15 +268,24 @@ export default function FlashcardStudyPage() {
     function onKey(e: KeyboardEvent) {
       const tag = (e.target as HTMLElement)?.tagName;
       if (tag === "INPUT" || tag === "TEXTAREA") return;
-      // Cmd/Ctrl+Z: undo last review.
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "z") {
-        if (history.length > 0) {
-          e.preventDefault();
-          undoLast();
-        }
+        if (history.length > 0) { e.preventDefault(); undoLast(); }
         return;
       }
       if (!current) return;
+      // Fill-blanks mode: Enter checks, then Space/Enter advances after check.
+      if (fillBlanksMode && current.type === "basic") {
+        if (!blankChecked && (e.key === " " || e.key === "Enter")) {
+          e.preventDefault();
+          checkBlanks();
+          return;
+        }
+        if (blankChecked) {
+          const r = ["1", "2", "3", "4"].indexOf(e.key);
+          if (r >= 0) { e.preventDefault(); rate((r + 1) as 1 | 2 | 3 | 4); }
+        }
+        return;
+      }
       if (!revealed && (e.key === " " || e.key === "Enter")) {
         e.preventDefault();
         setRevealed(true);
@@ -214,10 +293,7 @@ export default function FlashcardStudyPage() {
       }
       if (revealed) {
         const r = ["1", "2", "3", "4"].indexOf(e.key);
-        if (r >= 0) {
-          e.preventDefault();
-          rate((r + 1) as 1 | 2 | 3 | 4);
-        }
+        if (r >= 0) { e.preventDefault(); rate((r + 1) as 1 | 2 | 3 | 4); }
       }
     }
     window.addEventListener("keydown", onKey);
@@ -227,9 +303,6 @@ export default function FlashcardStudyPage() {
   if (!user) return <div className="p-8 text-center text-muted-foreground">Sign in to study.</div>;
   if (!loaded) return <div className="p-8 text-center text-muted-foreground">Loading…</div>;
 
-  // On mobile we *require* landscape for legibility; show a full-screen
-  // prompt until the device is rotated. The orientation listener will
-  // dismiss it automatically.
   if (isMobile && !isLandscape) {
     return (
       <div className="fixed inset-0 z-40 bg-background flex flex-col items-center justify-center p-8 text-center gap-4">
@@ -238,13 +311,9 @@ export default function FlashcardStudyPage() {
         </div>
         <h2 className="text-lg font-bold">Rotate your phone</h2>
         <p className="text-sm text-muted-foreground max-w-xs">
-          Flashcard reviews look best in landscape. Turn your phone sideways
-          to start studying.
+          Flashcard reviews look best in landscape. Turn your phone sideways to start studying.
         </p>
-        <Link
-          href={`/flashcards/${deckId}`}
-          className="text-xs text-muted-foreground underline mt-2"
-        >
+        <Link href={`/flashcards/${deckId}`} className="text-xs text-muted-foreground underline mt-2">
           Go back to the deck
         </Link>
       </div>
@@ -278,9 +347,21 @@ export default function FlashcardStudyPage() {
     );
   }
 
+  const isFillBlanksCard = fillBlanksMode && current.type === "basic" && !!fillTokenData;
+
   const frontMd = current.type === "cloze"
     ? (revealed ? cloze!.revealed : cloze!.hidden)
     : current.front;
+
+  // Wrong answers list for fill-blanks mode post-check.
+  const wrongAnswers = blankChecked
+    ? fillTokenData?.answers.filter((_, i) => !blankResults[i]).map((ans, idx) => {
+        const globalIdx = fillTokenData!.answers.findIndex(
+          (a, i) => a === ans && !blankResults[i] && i >= idx,
+        );
+        return { answer: ans, index: globalIdx };
+      })
+    : [];
 
   return (
     <div className="max-w-3xl w-full mx-auto p-6 space-y-5">
@@ -289,6 +370,11 @@ export default function FlashcardStudyPage() {
           <ArrowLeft className="w-3.5 h-3.5" /> Stop session
         </Link>
         <div className="flex items-center gap-3">
+          {fillBlanksMode && (
+            <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-primary/10 text-primary uppercase tracking-wider">
+              Fill blanks on
+            </span>
+          )}
           <button
             onClick={undoLast}
             disabled={history.length === 0}
@@ -315,24 +401,93 @@ export default function FlashcardStudyPage() {
         data-testid="study-card"
       >
         <div className="text-[10px] uppercase tracking-wider font-bold text-muted-foreground mb-4">
-          {current.type === "cloze" ? (revealed ? "Answer" : "Fill in the blanks") : (revealed ? "Answer" : "Question")}
+          {isFillBlanksCard
+            ? "Fill in the blanks"
+            : current.type === "cloze"
+            ? (revealed ? "Answer" : "Fill in the blanks")
+            : (revealed ? "Answer" : "Question")}
         </div>
-        <div className="flex-1 study-card-prose">
-          <MarkdownPreview value={frontMd} />
-          {revealed && current.type === "basic" && current.back && (
-            <div className="mt-6 pt-6 border-t border-dashed border-border">
-              <MarkdownPreview value={current.back} />
-            </div>
-          )}
-          {revealed && current.type === "cloze" && current.back && (
-            <div className="mt-6 pt-6 border-t border-dashed border-border opacity-80">
-              <MarkdownPreview value={current.back} />
-            </div>
-          )}
-        </div>
+
+        {isFillBlanksCard ? (
+          <div className="flex-1 space-y-4">
+            <FillBlanksView
+              tokens={fillTokenData!.tokens}
+              inputs={blankInputs}
+              checked={blankChecked}
+              results={blankResults}
+              onChange={(idx, val) =>
+                setBlankInputs(prev => prev.map((v, i) => i === idx ? val : v))
+              }
+            />
+            {blankChecked && wrongAnswers && wrongAnswers.length > 0 && (
+              <div className="mt-4 pt-4 border-t border-dashed border-border space-y-1">
+                <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider mb-2">
+                  Missed answers
+                </p>
+                {fillTokenData!.answers.map((ans, i) =>
+                  blankResults[i] ? null : (
+                    <p key={i} className="text-sm text-red-500 dark:text-red-400">
+                      Blank {i + 1}: <strong>{ans}</strong>
+                    </p>
+                  ),
+                )}
+              </div>
+            )}
+          </div>
+        ) : (
+          <div className="flex-1 study-card-prose">
+            <MarkdownPreview value={frontMd} />
+            {revealed && current.type === "basic" && current.back && (
+              <div className="mt-6 pt-6 border-t border-dashed border-border">
+                <MarkdownPreview value={current.back} />
+              </div>
+            )}
+            {revealed && current.type === "cloze" && current.back && (
+              <div className="mt-6 pt-6 border-t border-dashed border-border opacity-80">
+                <MarkdownPreview value={current.back} />
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
-      {!revealed ? (
+      {isFillBlanksCard ? (
+        !blankChecked ? (
+          <button
+            onClick={checkBlanks}
+            className="w-full py-3 rounded-xl bg-primary text-primary-foreground font-semibold hover:opacity-90 flex items-center justify-center gap-2"
+            data-testid="button-check-blanks"
+          >
+            <CheckCircle2 className="w-4 h-4" /> Check answers · <kbd className="text-xs opacity-70">Space</kbd>
+          </button>
+        ) : (
+          <div className="space-y-2">
+            {blankResults.every(r => r) ? (
+              <p className="text-center text-sm font-semibold text-emerald-500">
+                All correct! Rate how easy it felt:
+              </p>
+            ) : (
+              <p className="text-center text-sm font-semibold text-muted-foreground">
+                {blankResults.filter(r => r).length}/{blankResults.length} correct — rate your recall:
+              </p>
+            )}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+              {RATING_LABELS.map(r => (
+                <button
+                  key={r.rating}
+                  onClick={() => rate(r.rating as 1 | 2 | 3 | 4)}
+                  className={`${r.color} text-white py-3 rounded-xl font-semibold flex flex-col items-center text-sm transition-transform hover:scale-[1.02] active:scale-95`}
+                  data-testid={`button-rate-${r.rating}`}
+                >
+                  <span>{r.label}</span>
+                  <span className="text-[10px] opacity-80 font-normal mt-0.5">{r.hint}</span>
+                  <span className="text-[10px] opacity-60 mt-0.5">{r.key}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        )
+      ) : !revealed ? (
         <button
           onClick={() => setRevealed(true)}
           className="w-full py-3 rounded-xl bg-primary text-primary-foreground font-semibold hover:opacity-90 flex items-center justify-center gap-2"

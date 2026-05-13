@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "wouter";
 import {
-  Layers, Plus, Lock, Sparkles, Trash2, Pencil, Search, ChevronRight, ChevronDown,
+  Layers, Plus, Lock, Sparkles, Trash2, Pencil, Search, ChevronRight, ChevronDown, PenLine,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useAuthContext } from "@/lib/auth-context";
@@ -99,6 +99,17 @@ export default function FlashcardsPage() {
   const [filter, setFilter] = useState<string>("all");
   const [search, setSearch] = useState("");
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  const [fillBlanksMode, setFillBlanksMode] = useState<boolean>(() => {
+    try { return localStorage.getItem("revision_tracker_fill_blanks_mode") === "1"; } catch { return false; }
+  });
+
+  function toggleFillBlanks() {
+    setFillBlanksMode(prev => {
+      const next = !prev;
+      try { localStorage.setItem("revision_tracker_fill_blanks_mode", next ? "1" : "0"); } catch {}
+      return next;
+    });
+  }
 
   // Create-deck form state.
   const [name, setName] = useState("");
@@ -209,13 +220,33 @@ export default function FlashcardsPage() {
             Spaced-repetition decks · {totalCards} card{totalCards === 1 ? "" : "s"} · {totalDue} due now
           </p>
         </div>
-        <button
-          onClick={() => setCreating(c => !c)}
-          className="flex items-center gap-1.5 px-3.5 py-2 rounded-full bg-primary text-primary-foreground font-semibold text-sm hover:opacity-90 transition-opacity"
-          data-testid="button-new-deck"
-        >
-          <Plus className="w-4 h-4" /> New deck
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={toggleFillBlanks}
+            title={fillBlanksMode ? "Fill-blanks mode is ON — click to disable" : "Enable fill-blanks mode for study sessions"}
+            className={`flex items-center gap-1.5 px-3.5 py-2 rounded-full font-semibold text-sm transition-colors border ${
+              fillBlanksMode
+                ? "bg-primary/10 text-primary border-primary/30 hover:bg-primary/20"
+                : "bg-secondary text-muted-foreground border-border/60 hover:text-foreground hover:bg-secondary/70"
+            }`}
+            data-testid="button-fill-blanks-toggle"
+          >
+            <PenLine className="w-4 h-4" />
+            Fill blanks
+            <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${
+              fillBlanksMode ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground"
+            }`}>
+              {fillBlanksMode ? "ON" : "OFF"}
+            </span>
+          </button>
+          <button
+            onClick={() => setCreating(c => !c)}
+            className="flex items-center gap-1.5 px-3.5 py-2 rounded-full bg-primary text-primary-foreground font-semibold text-sm hover:opacity-90 transition-opacity"
+            data-testid="button-new-deck"
+          >
+            <Plus className="w-4 h-4" /> New deck
+          </button>
+        </div>
       </header>
 
       {creating && (

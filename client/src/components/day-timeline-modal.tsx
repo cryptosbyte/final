@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { format, parseISO } from "date-fns";
-import { X, Plus, Trash2, Check, Clock, GripVertical } from "lucide-react";
+import { X, Plus, Trash2, Check, Clock, GripVertical, CalendarDays } from "lucide-react";
 import {
   useTodos,
   addTodoLocal,
@@ -13,29 +13,33 @@ import {
   TASK_SUBJECTS,
   TASK_SUBJECT_LABEL,
 } from "@/hooks/use-todos";
+import {
+  useEvents,
+  addEventLocal,
+  updateEventLocal,
+  deleteEventLocal,
+  EVENT_COLOR_OPTIONS,
+  type CalendarEvent,
+  type EventColorId,
+} from "@/hooks/use-events";
 
 export const RT_TODO_DRAG_TYPE = "application/x-rt-todo-id";
 
 interface DayTimelineModalProps {
   date: string | null;
   onClose: () => void;
-  /**
-   * When provided, the timeline renders as a popover anchored near this rect
-   * instead of a centred modal. This is used for future-date previews from
-   * the calendar so the user can browse / drag tasks without a heavy modal.
-   */
   anchorRect?: DOMRect | null;
 }
 
-const POPOVER_WIDTH = 380;
-const POPOVER_MAX_HEIGHT_VH = 70;
+const POPOVER_WIDTH = 400;
+const POPOVER_MAX_HEIGHT_VH = 72;
 const POPOVER_GAP = 8;
 
 function computePopoverPosition(rect: DOMRect | null | undefined): { top: number; left: number } {
   if (!rect || typeof window === "undefined") return { top: 80, left: 80 };
   const vw = window.innerWidth;
   const vh = window.innerHeight;
-  const popHeight = Math.min(vh * (POPOVER_MAX_HEIGHT_VH / 100), 560);
+  const popHeight = Math.min(vh * (POPOVER_MAX_HEIGHT_VH / 100), 580);
   let left = rect.left + rect.width / 2 - POPOVER_WIDTH / 2;
   left = Math.max(12, Math.min(left, vw - POPOVER_WIDTH - 12));
   let top = rect.bottom + POPOVER_GAP;
@@ -46,41 +50,60 @@ function computePopoverPosition(rect: DOMRect | null | undefined): { top: number
 }
 
 const SUBJECT_COLOR: Record<TaskSubject, string> = {
-  biology: "hsl(var(--biology))",
-  chemistry: "hsl(var(--chemistry))",
-  maths: "hsl(var(--maths))",
+  biology:       "hsl(var(--biology))",
+  chemistry:     "hsl(var(--chemistry))",
+  maths:         "hsl(var(--maths))",
   miscellaneous: "hsl(var(--muted-foreground))",
 };
 
 const HOURS = Array.from({ length: 24 }, (_, i) => i);
 
-function pad(n: number) {
-  return n.toString().padStart(2, "0");
-}
+function pad(n: number) { return n.toString().padStart(2, "0"); }
 
 function todoHour(todo: TodoItem): number | "all-day" {
   if (!todo.deadline) return "all-day";
   if (!todo.deadline.includes("T")) return "all-day";
-  const time = todo.deadline.split("T")[1] ?? "00:00";
-  const h = parseInt(time.slice(0, 2), 10);
+  const h = parseInt((todo.deadline.split("T")[1] ?? "00:00").slice(0, 2), 10);
   return Number.isFinite(h) ? h : "all-day";
 }
 
+function eventHour(ev: CalendarEvent): number {
+  const h = parseInt(ev.startTime.slice(0, 2), 10);
+  return Number.isFinite(h) ? h : 0;
+}
+
+// What type picker is currently open (null = none)
+type TypePickerHour = number | "all-day" | null;
+
+const EVENT_DRAFT_ID = "__rt_timeline_event_draft__";
+
 export function DayTimelineModal({ date, onClose, anchorRect }: DayTimelineModalProps) {
   const allTodos = useTodos();
+  const allEvents = useEvents();
   const isPopover = !!anchorRect;
+
+  // Task editing state
+  const DRAFT_ID = "__rt_timeline_draft__";
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editText, setEditText] = useState("");
   const [editTime, setEditTime] = useState("09:00");
   const [editSubject, setEditSubject] = useState<TaskSubject>("miscellaneous");
-  const [dragOverHour, setDragOverHour] = useState<number | "all-day" | null>(null);
-  // Transient draft for a brand-new task. The draft is purely local state and
-  // is NOT inserted into the global todo list until the user saves it with
-  // non-empty text. This prevents empty placeholder tasks from appearing in
-  // the to-do panel.
-  const DRAFT_ID = "__rt_timeline_draft__";
   const [draftHour, setDraftHour] = useState<number | "all-day" | null>(null);
+  const [dragOverHour, setDragOverHour] = useState<number | "all-day" | null>(null);
+
+  // Type picker: which hour is showing the "Task | Event" choice
+  const [typePickerHour, setTypePickerHour] = useState<TypePickerHour>(null);
+
+  // Event editing/creation state
+  const [editingEventId, setEditingEventId] = useState<string | null>(null);
+  const [eventDraftHour, setEventDraftHour] = useState<number | null>(null);
+  const [eventTitle, setEventTitle] = useState("");
+  const [eventStartTime, setEventStartTime] = useState("09:00");
+  const [eventEndTime, setEventEndTime] = useState("10:00");
+  const [eventColor, setEventColor] = useState<EventColorId>("indigo");
+
   const editInputRef = useRef<HTMLInputElement>(null);
+  const eventTitleRef = useRef<HTMLInputElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const hourRefs = useRef<Record<number, HTMLDivElement | null>>({});
   const popoverRef = useRef<HTMLDivElement>(null);
@@ -91,55 +114,53 @@ export function DayTimelineModal({ date, onClose, anchorRect }: DayTimelineModal
     setPopoverPos(computePopoverPosition(anchorRect ?? null));
   }, [isPopover, date, anchorRect]);
 
-  // Close on escape — capture phase + stopPropagation so the underlying day-entry
-  // popover doesn't also close on the same keypress.
   useEffect(() => {
     if (!date) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "Escape") return;
       e.stopPropagation();
-      if (editingId !== null) return; // input handles its own escape
+      if (editingId !== null || editingEventId !== null || typePickerHour !== null) {
+        cancelEdit();
+        cancelEventEdit();
+        setTypePickerHour(null);
+        return;
+      }
       onClose();
     };
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
-  }, [date, editingId, onClose]);
+  }, [date, editingId, editingEventId, typePickerHour, onClose]);
 
-  // Popover-mode click-outside handler.
   useEffect(() => {
     if (!isPopover || !date) return;
     const onDown = (e: MouseEvent) => {
-      if (editingId !== null) return;
+      if (editingId !== null || editingEventId !== null) return;
       if (popoverRef.current && !popoverRef.current.contains(e.target as Node)) {
         onClose();
       }
     };
     window.addEventListener("mousedown", onDown);
     return () => window.removeEventListener("mousedown", onDown);
-  }, [isPopover, date, editingId, onClose]);
+  }, [isPopover, date, editingId, editingEventId, onClose]);
 
-  // Clear draft state when timeline closes.
   useEffect(() => {
     if (!date) {
       setDraftHour(null);
+      setTypePickerHour(null);
+      setEditingEventId(null);
       if (editingId === DRAFT_ID) setEditingId(null);
     }
   }, [date, editingId]);
 
-  // Auto-scroll to current hour (or 8am) on open. Skip in popover mode so the
-  // popover doesn't yank scroll position around the page.
   useEffect(() => {
     if (!date || isPopover) return;
     const now = new Date();
-    const todayStr = format(now, "yyyy-MM-dd");
-    const focusHour = date === todayStr ? Math.max(0, now.getHours() - 1) : 8;
+    const focusHour = date === format(now, "yyyy-MM-dd") ? Math.max(0, now.getHours() - 1) : 8;
     setTimeout(() => {
       hourRefs.current[focusHour]?.scrollIntoView({ block: "start", behavior: "auto" });
     }, 30);
   }, [date, isPopover]);
 
-  // After mount in popover mode, scroll the inner timeline to ~8am without
-  // moving the parent page.
   useEffect(() => {
     if (!isPopover || !date) return;
     setTimeout(() => {
@@ -159,23 +180,36 @@ export function DayTimelineModal({ date, onClose, anchorRect }: DayTimelineModal
     });
   }, [allTodos, date]);
 
+  const eventsForDay = useMemo(() => {
+    if (!date) return [];
+    return allEvents.filter(e => e.date === date);
+  }, [allEvents, date]);
+
   const groupedByHour = useMemo(() => {
     const out: Record<number, TodoItem[]> = {};
     const allDay: TodoItem[] = [];
     for (const t of todosForDay) {
       const h = todoHour(t);
-      if (h === "all-day") {
-        allDay.push(t);
-        continue;
-      }
+      if (h === "all-day") { allDay.push(t); continue; }
       (out[h] = out[h] ?? []).push(t);
     }
     return { byHour: out, allDay };
   }, [todosForDay]);
 
+  const eventsByHour = useMemo(() => {
+    const out: Record<number, CalendarEvent[]> = {};
+    for (const ev of eventsForDay) {
+      const h = eventHour(ev);
+      (out[h] = out[h] ?? []).push(ev);
+    }
+    return out;
+  }, [eventsForDay]);
+
   if (!date) return null;
 
   const dateLabel = format(parseISO(date), "EEEE, do MMMM yyyy");
+
+  // ── Task editing ──────────────────────────────────────────────────────────
 
   const startEdit = (todo: TodoItem) => {
     setEditingId(todo.id);
@@ -183,62 +217,106 @@ export function DayTimelineModal({ date, onClose, anchorRect }: DayTimelineModal
     const time = todo.deadline?.includes("T") ? (todo.deadline.split("T")[1] ?? "").slice(0, 5) : "";
     setEditTime(time || "09:00");
     setEditSubject(todo.subject ?? "miscellaneous");
-    setTimeout(() => {
-      editInputRef.current?.focus();
-      editInputRef.current?.select();
-    }, 30);
+    setTimeout(() => { editInputRef.current?.focus(); editInputRef.current?.select(); }, 30);
   };
 
   const commitEdit = () => {
     if (!editingId) return;
     const text = editText.trim();
     if (editingId === DRAFT_ID) {
-      // Brand-new task: only persist if the user typed something.
-      if (!text) {
-        setDraftHour(null);
-        setEditingId(null);
-        return;
-      }
+      if (!text) { setDraftHour(null); setEditingId(null); return; }
       const deadline = draftHour === "all-day" ? (date ?? "") : `${date}T${editTime}`;
       addTodoLocal({ text, deadline, subject: editSubject });
       setDraftHour(null);
       setEditingId(null);
       return;
     }
-    if (!text) {
-      // Empty text on an existing row → keep it untouched, just exit edit mode.
-      setEditingId(null);
-      return;
-    }
-    const newDeadline = `${date}T${editTime}`;
-    updateTodoLocal(editingId, {
-      text,
-      deadline: newDeadline,
-      subject: editSubject,
-    });
+    if (!text) { setEditingId(null); return; }
+    updateTodoLocal(editingId, { text, deadline: `${date}T${editTime}`, subject: editSubject });
     setEditingId(null);
   };
 
   const cancelEdit = () => {
-    if (editingId === DRAFT_ID) {
-      setDraftHour(null);
-    }
+    if (editingId === DRAFT_ID) setDraftHour(null);
     setEditingId(null);
   };
 
-  const createForHour = (h: number | "all-day") => {
+  // ── Event editing ─────────────────────────────────────────────────────────
+
+  const startEventEdit = (ev: CalendarEvent) => {
+    setEditingEventId(ev.id);
+    setEventTitle(ev.title);
+    setEventStartTime(ev.startTime);
+    setEventEndTime(ev.endTime);
+    setEventColor(ev.color);
+    setTimeout(() => { eventTitleRef.current?.focus(); eventTitleRef.current?.select(); }, 30);
+  };
+
+  const commitEventEdit = () => {
+    const title = eventTitle.trim();
+    if (!title) { cancelEventEdit(); return; }
+    if (editingEventId === EVENT_DRAFT_ID) {
+      addEventLocal({
+        title,
+        date: date ?? "",
+        startTime: eventStartTime,
+        endTime: eventEndTime,
+        color: eventColor,
+      });
+    } else if (editingEventId) {
+      updateEventLocal(editingEventId, {
+        title,
+        startTime: eventStartTime,
+        endTime: eventEndTime,
+        color: eventColor,
+      });
+    }
+    cancelEventEdit();
+  };
+
+  const cancelEventEdit = () => {
+    setEditingEventId(null);
+    setEventDraftHour(null);
+    setEventTitle("");
+    setEventStartTime("09:00");
+    setEventEndTime("10:00");
+    setEventColor("indigo");
+  };
+
+  // ── Type picker (choose Task or Event when clicking "+") ──────────────────
+
+  const openTypePicker = (h: number | "all-day") => {
     if (editingId) commitEdit();
+    if (editingEventId) cancelEventEdit();
+    setTypePickerHour(prev => (prev === h ? null : h));
+  };
+
+  const pickTask = (h: number | "all-day") => {
+    setTypePickerHour(null);
     setDraftHour(h);
     setEditingId(DRAFT_ID);
     setEditText("");
-    setEditTime(h === "all-day" ? "09:00" : `${pad(h)}:00`);
+    setEditTime(h === "all-day" ? "09:00" : `${pad(h as number)}:00`);
     setEditSubject("miscellaneous");
-    setTimeout(() => {
-      editInputRef.current?.focus();
-    }, 30);
+    setTimeout(() => { editInputRef.current?.focus(); }, 30);
   };
 
-  const renderEditRow = (key: string, testId: string) => (
+  const pickEvent = (h: number | "all-day") => {
+    setTypePickerHour(null);
+    const defaultHour = h === "all-day" ? 9 : (h as number);
+    const endHour = Math.min(defaultHour + 1, 23);
+    setEventDraftHour(defaultHour);
+    setEventTitle("");
+    setEventStartTime(`${pad(defaultHour)}:00`);
+    setEventEndTime(`${pad(endHour)}:00`);
+    setEventColor("indigo");
+    setEditingEventId(EVENT_DRAFT_ID);
+    setTimeout(() => { eventTitleRef.current?.focus(); }, 30);
+  };
+
+  // ── Render helpers ────────────────────────────────────────────────────────
+
+  const renderTaskEditRow = (key: string, testId: string) => (
     <div
       key={key}
       className="rounded-lg border border-[hsl(var(--primary)/0.5)] bg-[hsl(var(--primary)/0.05)] p-2 space-y-2"
@@ -249,14 +327,8 @@ export function DayTimelineModal({ date, onClose, anchorRect }: DayTimelineModal
         value={editText}
         onChange={e => setEditText(e.target.value)}
         onKeyDown={e => {
-          if (e.key === "Enter") {
-            e.stopPropagation();
-            commitEdit();
-          }
-          if (e.key === "Escape") {
-            e.stopPropagation();
-            cancelEdit();
-          }
+          if (e.key === "Enter") { e.stopPropagation(); commitEdit(); }
+          if (e.key === "Escape") { e.stopPropagation(); cancelEdit(); }
         }}
         placeholder="Task description…"
         className="w-full text-sm bg-background border border-border rounded-md px-2 py-1.5 outline-none focus:ring-2 focus:ring-[hsl(var(--primary)/0.4)]"
@@ -301,14 +373,119 @@ export function DayTimelineModal({ date, onClose, anchorRect }: DayTimelineModal
     </div>
   );
 
+  const renderEventEditRow = (key: string) => (
+    <div
+      key={key}
+      className="rounded-lg border border-[hsl(240_60%_58%/0.5)] bg-[hsl(240_60%_58%/0.05)] p-2 space-y-2"
+      data-testid="timeline-event-edit-form"
+    >
+      <input
+        ref={eventTitleRef}
+        value={eventTitle}
+        onChange={e => setEventTitle(e.target.value)}
+        onKeyDown={e => {
+          if (e.key === "Enter") { e.stopPropagation(); commitEventEdit(); }
+          if (e.key === "Escape") { e.stopPropagation(); cancelEventEdit(); }
+        }}
+        placeholder="Event title…"
+        className="w-full text-sm bg-background border border-border rounded-md px-2 py-1.5 outline-none focus:ring-2 focus:ring-[hsl(240_60%_58%/0.4)]"
+        data-testid="timeline-event-title"
+      />
+      <div className="flex items-center gap-2 flex-wrap">
+        <input
+          type="time"
+          value={eventStartTime}
+          onChange={e => setEventStartTime(e.target.value)}
+          className="text-xs bg-background border border-border rounded-md px-2 py-1 outline-none"
+          data-testid="timeline-event-start"
+        />
+        <span className="text-xs text-muted-foreground">to</span>
+        <input
+          type="time"
+          value={eventEndTime}
+          onChange={e => setEventEndTime(e.target.value)}
+          className="text-xs bg-background border border-border rounded-md px-2 py-1 outline-none"
+          data-testid="timeline-event-end"
+        />
+        <div className="flex items-center gap-1 ml-1">
+          {EVENT_COLOR_OPTIONS.map(c => (
+            <button
+              key={c.id}
+              type="button"
+              onClick={() => setEventColor(c.id as EventColorId)}
+              title={c.label}
+              className={`w-4 h-4 rounded-full border-2 transition-transform ${
+                eventColor === c.id ? "scale-125 border-foreground" : "border-transparent"
+              }`}
+              style={{ background: c.bg }}
+            />
+          ))}
+        </div>
+        <div className="ml-auto flex items-center gap-1">
+          <button
+            onClick={cancelEventEdit}
+            className="text-xs px-2 py-1 rounded-md text-muted-foreground hover:bg-secondary"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={commitEventEdit}
+            disabled={!eventTitle.trim()}
+            className="text-xs px-2 py-1 rounded-md font-semibold bg-[hsl(240_60%_58%)] text-white hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed"
+            data-testid="timeline-event-save"
+          >
+            {editingEventId === EVENT_DRAFT_ID ? "Add event" : "Save"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+
+  const renderEventRow = (ev: CalendarEvent) => {
+    const colorOpt = EVENT_COLOR_OPTIONS.find(c => c.id === ev.color) ?? EVENT_COLOR_OPTIONS[0]!;
+    if (editingEventId === ev.id) return renderEventEditRow(ev.id);
+    return (
+      <div
+        key={ev.id}
+        className="group flex items-center gap-2 rounded-lg px-2.5 py-1.5 border"
+        style={{
+          background: colorOpt.bg + "22",
+          borderColor: colorOpt.bg + "66",
+        }}
+        data-testid={`timeline-event-${ev.id}`}
+      >
+        <CalendarDays className="w-3 h-3 shrink-0" style={{ color: colorOpt.bg }} />
+        <button
+          type="button"
+          onClick={() => startEventEdit(ev)}
+          className="flex-1 text-left min-w-0"
+        >
+          <p className="text-sm font-semibold truncate" style={{ color: colorOpt.bg }}>
+            {ev.title}
+          </p>
+          <p className="text-[11px] text-muted-foreground tabular-nums">
+            {ev.startTime}–{ev.endTime}
+          </p>
+        </button>
+        <button
+          type="button"
+          onClick={() => deleteEventLocal(ev.id)}
+          className="opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground hover:text-destructive p-1 rounded"
+          aria-label="Delete event"
+          data-testid={`timeline-event-delete-${ev.id}`}
+        >
+          <Trash2 className="w-3.5 h-3.5" />
+        </button>
+      </div>
+    );
+  };
+
   const renderTodoRow = (todo: TodoItem) => {
     const isEditing = editingId === todo.id;
     const color = SUBJECT_COLOR[todo.subject ?? "miscellaneous"];
     const time = todo.deadline?.includes("T") ? (todo.deadline.split("T")[1] ?? "").slice(0, 5) : "";
 
-    if (isEditing) {
-      return renderEditRow(todo.id, `timeline-edit-${todo.id}`);
-    }
+    if (isEditing) return renderTaskEditRow(todo.id, `timeline-edit-${todo.id}`);
 
     return (
       <div
@@ -316,8 +493,6 @@ export function DayTimelineModal({ date, onClose, anchorRect }: DayTimelineModal
         draggable
         onDragStart={(e) => {
           e.dataTransfer.setData(RT_TODO_DRAG_TYPE, todo.id);
-          // text/plain stores the SAME id so any fallback drop handler that
-          // reads it still rewrites the correct todo.
           e.dataTransfer.setData("text/plain", todo.id);
           e.dataTransfer.effectAllowed = "move";
         }}
@@ -375,6 +550,39 @@ export function DayTimelineModal({ date, onClose, anchorRect }: DayTimelineModal
     );
   };
 
+  const renderTypePicker = (h: number | "all-day") => (
+    <div
+      key="type-picker"
+      className="flex items-center gap-1.5 py-1"
+      data-testid={`timeline-type-picker-${h}`}
+    >
+      <button
+        type="button"
+        onClick={() => pickTask(h)}
+        className="flex items-center gap-1 text-xs font-semibold px-2.5 py-1.5 rounded-full bg-[hsl(var(--primary)/0.1)] text-[hsl(var(--primary))] hover:bg-[hsl(var(--primary)/0.2)] transition-colors"
+        data-testid={`timeline-pick-task-${h}`}
+      >
+        <Check className="w-3 h-3" /> Task
+      </button>
+      <button
+        type="button"
+        onClick={() => pickEvent(h)}
+        className="flex items-center gap-1 text-xs font-semibold px-2.5 py-1.5 rounded-full bg-[hsl(240_60%_58%/0.12)] text-[hsl(240_60%_58%)] hover:bg-[hsl(240_60%_58%/0.22)] transition-colors"
+        data-testid={`timeline-pick-event-${h}`}
+      >
+        <CalendarDays className="w-3 h-3" /> Event
+      </button>
+      <button
+        type="button"
+        onClick={() => setTypePickerHour(null)}
+        className="text-xs text-muted-foreground hover:text-foreground px-1 py-1"
+        aria-label="Cancel"
+      >
+        <X className="w-3.5 h-3.5" />
+      </button>
+    </div>
+  );
+
   const handleHourDragOver = (e: React.DragEvent, h: number | "all-day") => {
     if (!e.dataTransfer.types.includes(RT_TODO_DRAG_TYPE) && !e.dataTransfer.types.includes("text/plain")) return;
     e.preventDefault();
@@ -395,15 +603,19 @@ export function DayTimelineModal({ date, onClose, anchorRect }: DayTimelineModal
     updateTodoLocal(id, { deadline: newDeadline });
   };
 
+  // ── Counts for footer ─────────────────────────────────────────────────────
+  const taskCount = todosForDay.length;
+  const eventCount = eventsForDay.length;
+
   const inner = (
     <div
       ref={popoverRef}
       className={
         isPopover
-          ? "bg-card border border-border/60 rounded-2xl shadow-2xl w-[380px] max-w-[calc(100vw-1.5rem)] flex flex-col overflow-hidden animate-in zoom-in-95 fade-in-0"
+          ? "bg-card border border-border/60 rounded-2xl shadow-2xl flex flex-col overflow-hidden animate-in zoom-in-95 fade-in-0"
           : "bg-card border border-border/60 rounded-3xl shadow-2xl w-full max-w-lg max-h-[85vh] flex flex-col overflow-hidden animate-in zoom-in-95"
       }
-      style={isPopover ? { maxHeight: `${POPOVER_MAX_HEIGHT_VH}vh` } : undefined}
+      style={isPopover ? { width: POPOVER_WIDTH, maxWidth: "calc(100vw - 1.5rem)", maxHeight: `${POPOVER_MAX_HEIGHT_VH}vh` } : undefined}
       onClick={(e) => e.stopPropagation()}
     >
       <div className={`flex items-start justify-between gap-3 ${isPopover ? "px-4 pt-3.5 pb-2.5" : "px-6 pt-5 pb-3"} border-b border-border/60 shrink-0`}>
@@ -413,16 +625,9 @@ export function DayTimelineModal({ date, onClose, anchorRect }: DayTimelineModal
             Day Timeline
           </div>
           <h2 className={`${isPopover ? "text-base" : "text-xl"} font-bold tracking-tight text-foreground mt-0.5`}>{dateLabel}</h2>
-          {!isPopover && (
-            <p className="text-xs text-muted-foreground mt-0.5">
-              Click any hour to add a task. Drag a task to a different hour, or onto another date in the calendar.
-            </p>
-          )}
-          {isPopover && (
-            <p className="text-[11px] text-muted-foreground mt-0.5">
-              Drag tasks between times, or drop on another calendar day.
-            </p>
-          )}
+          <p className={`${isPopover ? "text-[11px]" : "text-xs"} text-muted-foreground mt-0.5`}>
+            Click any hour · choose a <strong>Task</strong> or <strong>Event</strong>
+          </p>
         </div>
         <button
           onClick={onClose}
@@ -435,8 +640,7 @@ export function DayTimelineModal({ date, onClose, anchorRect }: DayTimelineModal
       </div>
 
       <div ref={scrollRef} className={`flex-1 overflow-y-auto ${isPopover ? "px-3 py-2" : "px-4 py-3"}`}>
-        {/* All-day section — always rendered as a drop zone so a timed task can
-            always be converted to all-day by dragging onto it. */}
+        {/* All-day tasks section */}
         <div
           className={`mb-3 pb-3 border-b border-border/60 rounded-md transition-colors ${
             dragOverHour === "all-day" ? "bg-[hsl(var(--primary)/0.10)] outline outline-2 outline-[hsl(var(--primary)/0.45)]" : ""
@@ -450,31 +654,37 @@ export function DayTimelineModal({ date, onClose, anchorRect }: DayTimelineModal
           </p>
           <div className="space-y-1.5 px-2">
             {groupedByHour.allDay.map(t => renderTodoRow(t))}
-            {editingId === DRAFT_ID && draftHour === "all-day" && (
-              renderEditRow(DRAFT_ID, "timeline-edit-draft")
-            )}
+            {editingId === DRAFT_ID && draftHour === "all-day" && renderTaskEditRow(DRAFT_ID, "timeline-edit-draft")}
+            {editingEventId === EVENT_DRAFT_ID && eventDraftHour === null && renderEventEditRow(EVENT_DRAFT_ID)}
             {groupedByHour.allDay.length === 0 && !(editingId === DRAFT_ID && draftHour === "all-day") && (
               <p className="text-[11px] text-muted-foreground/70 italic px-1 py-1">
                 {dragOverHour === "all-day" ? "Drop to make all-day" : "Drag a task here to make it all-day"}
               </p>
             )}
-            <button
-              type="button"
-              onClick={() => createForHour("all-day")}
-              className="text-[11px] text-muted-foreground hover:text-foreground flex items-center gap-1 px-1 opacity-60 hover:opacity-100 transition-opacity"
-              data-testid="timeline-add-all-day"
-            >
-              <Plus className="w-3 h-3" />
-              Add all-day task
-            </button>
+            {typePickerHour === "all-day"
+              ? renderTypePicker("all-day")
+              : (
+                <button
+                  type="button"
+                  onClick={() => openTypePicker("all-day")}
+                  className="text-[11px] text-muted-foreground hover:text-foreground flex items-center gap-1 px-1 opacity-60 hover:opacity-100 transition-opacity"
+                  data-testid="timeline-add-all-day"
+                >
+                  <Plus className="w-3 h-3" /> Add all-day task
+                </button>
+              )}
           </div>
         </div>
 
-
         {HOURS.map(h => {
-          const items = groupedByHour.byHour[h] ?? [];
+          const tasks = groupedByHour.byHour[h] ?? [];
+          const events = eventsByHour[h] ?? [];
           const label = `${pad(h)}:00`;
           const isDropOver = dragOverHour === h;
+          const hasContent = tasks.length > 0 || events.length > 0
+            || (editingId === DRAFT_ID && draftHour === h)
+            || (editingEventId === EVENT_DRAFT_ID && eventDraftHour === h)
+            || (editingEventId !== null && editingEventId !== EVENT_DRAFT_ID && eventsByHour[h]?.some(e => e.id === editingEventId));
           return (
             <div
               key={h}
@@ -497,35 +707,42 @@ export function DayTimelineModal({ date, onClose, anchorRect }: DayTimelineModal
                     : "border-border/60"
                 }`}
               >
-                {items.length === 0 && !(editingId === DRAFT_ID && draftHour === h) ? (
-                  <button
-                    type="button"
-                    onClick={() => createForHour(h)}
-                    className={`w-full text-left text-[11px] rounded-lg px-2 py-1.5 flex items-center gap-1.5 transition-opacity ${
-                      isDropOver
-                        ? "text-[hsl(var(--primary))] opacity-100"
-                        : "text-muted-foreground hover:text-foreground hover:bg-secondary/50 opacity-0 group-hover:opacity-100"
-                    }`}
-                    data-testid={`timeline-add-${h}`}
-                  >
-                    <Plus className="w-3 h-3" />
-                    {isDropOver ? `Drop task at ${label}` : `Add task at ${label}`}
-                  </button>
-                ) : (
-                  <div className="space-y-1.5">
-                    {items.map(renderTodoRow)}
-                    {editingId === DRAFT_ID && draftHour === h && (
-                      renderEditRow(DRAFT_ID, "timeline-edit-draft")
-                    )}
+                {!hasContent ? (
+                  typePickerHour === h ? (
+                    renderTypePicker(h)
+                  ) : (
                     <button
                       type="button"
-                      onClick={() => createForHour(h)}
-                      className="text-[11px] text-muted-foreground hover:text-foreground flex items-center gap-1 px-1 opacity-0 group-hover:opacity-100 transition-opacity"
-                      data-testid={`timeline-add-more-${h}`}
+                      onClick={() => openTypePicker(h)}
+                      className={`w-full text-left text-[11px] rounded-lg px-2 py-1.5 flex items-center gap-1.5 transition-opacity ${
+                        isDropOver
+                          ? "text-[hsl(var(--primary))] opacity-100"
+                          : "text-muted-foreground hover:text-foreground hover:bg-secondary/50 opacity-0 group-hover:opacity-100"
+                      }`}
+                      data-testid={`timeline-add-${h}`}
                     >
                       <Plus className="w-3 h-3" />
-                      Add another
+                      {isDropOver ? `Drop task at ${label}` : `Add at ${label}`}
                     </button>
+                  )
+                ) : (
+                  <div className="space-y-1.5">
+                    {events.map(renderEventRow)}
+                    {tasks.map(renderTodoRow)}
+                    {editingId === DRAFT_ID && draftHour === h && renderTaskEditRow(DRAFT_ID, "timeline-edit-draft")}
+                    {editingEventId === EVENT_DRAFT_ID && eventDraftHour === h && renderEventEditRow(EVENT_DRAFT_ID)}
+                    {typePickerHour === h
+                      ? renderTypePicker(h)
+                      : (
+                        <button
+                          type="button"
+                          onClick={() => openTypePicker(h)}
+                          className="text-[11px] text-muted-foreground hover:text-foreground flex items-center gap-1 px-1 opacity-0 group-hover:opacity-100 transition-opacity"
+                          data-testid={`timeline-add-more-${h}`}
+                        >
+                          <Plus className="w-3 h-3" /> Add another
+                        </button>
+                      )}
                   </div>
                 )}
               </div>
@@ -536,7 +753,8 @@ export function DayTimelineModal({ date, onClose, anchorRect }: DayTimelineModal
 
       <div className={`flex items-center justify-between gap-2 ${isPopover ? "px-4 py-2.5" : "px-5 py-3"} border-t border-border/60 shrink-0`}>
         <p className="text-[11px] text-muted-foreground">
-          {todosForDay.length} task{todosForDay.length === 1 ? "" : "s"} on this day
+          {taskCount} task{taskCount === 1 ? "" : "s"}
+          {eventCount > 0 && ` · ${eventCount} event${eventCount === 1 ? "" : "s"}`}
         </p>
         <button
           onClick={onClose}
@@ -567,7 +785,7 @@ export function DayTimelineModal({ date, onClose, anchorRect }: DayTimelineModal
       aria-label={`Timeline for ${dateLabel}`}
       data-testid="day-timeline-modal"
       onClick={(e) => {
-        if (e.target === e.currentTarget && !editingId) onClose();
+        if (e.target === e.currentTarget && !editingId && !editingEventId) onClose();
       }}
     >
       {inner}
