@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import type { AuthUser } from "@/lib/api-client";
 import { syncReadyPromise } from "@/lib/device-sync";
 
-export type RevisionType = "module_content" | "exam_practice" | "past_paper" | "mixed_exercises" | "anki_flashcards" | "day_event";
+export type RevisionType = "module_content" | "exam_practice" | "past_paper" | "mixed_exercises" | "anki_flashcards";
 export type Subject = "biology" | "chemistry" | "maths";
 
 export interface ExamPaperRecord {
@@ -25,7 +25,6 @@ export interface AnkiSessionRecord {
 export interface SubjectEntry {
   types: RevisionType[];
   productivity: number;
-  events?: string[];
   moduleContent?: string[];
   examPaperRecords?: ExamPaperRecord[];
   ankiSessions?: AnkiSessionRecord[];

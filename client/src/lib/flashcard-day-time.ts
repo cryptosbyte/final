@@ -21,8 +21,7 @@ type RevisionType =
   | "exam_practice"
   | "past_paper"
   | "mixed_exercises"
-  | "anki_flashcards"
-  | "day_event";
+  | "anki_flashcards";
 
 interface AnkiSessionRecord {
   id: string;
@@ -33,7 +32,6 @@ interface AnkiSessionRecord {
 interface SubjectEntry {
   types: RevisionType[];
   productivity: number;
-  events?: string[];
   moduleContent?: string[];
   examPaperRecords?: unknown[];
   ankiSessions?: AnkiSessionRecord[];
@@ -78,7 +76,6 @@ const SUBJECT_MAP: Record<string, Subject | null> = {
 export function recordFlashcardStudyTime(opts: {
   deckId: string;
   deckSubject: string;
-  deckTopicId?: string;
   totalSessionMs: number;
   loggedIn: boolean;
 }): void {
@@ -89,21 +86,18 @@ export function recordFlashcardStudyTime(opts: {
   const date = todayKey();
   const sessionId = `flashcard-auto-${opts.deckId}`;
   const hours = opts.totalSessionMs / 3_600_000;
-  const topicId = opts.deckTopicId && opts.deckSubject === "biology"
-    ? opts.deckTopicId
-    : "auto-flashcards";
 
   const all = readAll();
   const day: DayEntry = all[date] ?? { date, subjects: {} };
   const subjEntry: SubjectEntry =
-    day.subjects[subject] ?? { types: [], productivity: 0, events: [] };
+    day.subjects[subject] ?? { types: [], productivity: 0 };
 
   // Upsert the auto session for this deck.
   const sessions = subjEntry.ankiSessions ? [...subjEntry.ankiSessions] : [];
   const idx = sessions.findIndex((s) => s.id === sessionId);
   const next: AnkiSessionRecord = {
     id: sessionId,
-    topicId: idx >= 0 ? sessions[idx].topicId : topicId,
+    topicId: idx >= 0 ? sessions[idx].topicId : "auto-flashcards",
     hours: Math.max(hours, idx >= 0 ? Math.max(sessions[idx].hours, hours) : hours),
   };
   if (idx >= 0) sessions[idx] = next; else sessions.push(next);
@@ -115,7 +109,6 @@ export function recordFlashcardStudyTime(opts: {
     ...subjEntry,
     types: Array.from(types),
     ankiSessions: sessions,
-    events: Array.from(new Set([...(subjEntry.events ?? []), `flashcard:${opts.deckId}:${topicId}:${hours.toFixed(2)}`])),
   };
   const updatedDay: DayEntry = {
     ...day,
