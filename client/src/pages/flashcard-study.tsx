@@ -7,7 +7,7 @@ import { useAuthContext } from "@/lib/auth-context";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { MarkdownPreview } from "@/components/markdown-editor";
 import { renderCloze } from "@/lib/cloze";
-import { recordFlashcardStudyTime } from "@/lib/flashcard-day-time";
+import { recordFlashcardStudyTime, extractBioTopicId } from "@/lib/flashcard-day-time";
 import { buildFillTokens, checkAnswer, type FillToken } from "@/lib/fill-blanks";
 
 interface Card {
@@ -172,7 +172,11 @@ export default function FlashcardStudyPage() {
   const [blankResults, setBlankResults] = useState<boolean[]>([]);
 
   const startRef = useRef<number>(Date.now());
-  const sessionMsRef = useRef<number>(0);
+  // Accumulated ms per session key — one entry per resolved biology topic
+  // (e.g. "flashcard-auto-5.1.2") or per leaf deckId for other subjects.
+  const sessionMsByTopicRef = useRef<Record<string, number>>({});
+  // All decks fetched on mount so each card's deckId resolves to a name/subject.
+  const deckMapRef = useRef<Record<string, { name: string; subject: string }>>({});
 
   const current = queue[0];
 
@@ -206,6 +210,16 @@ export default function FlashcardStudyPage() {
       .then(j => {
         if (j.subject) setDeckSubject(j.subject);
         if (j.name) setDeckName(j.name);
+      })
+      .catch(() => { /* non-fatal */ });
+
+    // Fetch ALL decks so we can map each card's deckId to its subdeck name.
+    // This lets studying "Module 5" still log "5.1.2", "5.2.1", etc. correctly.
+    jsonFetch<{ decks: Array<{ id: string; name: string; subject: string }> }>("/api/flashcard-decks")
+      .then(j => {
+        for (const d of j.decks) {
+          deckMapRef.current[d.id] = { name: d.name, subject: d.subject };
+        }
       })
       .catch(() => { /* non-fatal */ });
   }, [user, deckId, toast]);
@@ -246,13 +260,45 @@ export default function FlashcardStudyPage() {
     const snapshot: ReviewHistoryEntry = { card: { ...current }, queueLength: queue.length };
     const durationMs = Date.now() - startRef.current;
     const dateKey = format(new Date(), "yyyy-MM-dd");
-    sessionMsRef.current += Math.min(durationMs, 5 * 60 * 1000);
-    if (deckSubject) {
+    const cappedMs = Math.min(durationMs, 5 * 60 * 1000);
+
+    // Determine the subject and topic for THIS specific card.
+    // When studying a parent deck (e.g. "Module 5"), each card has its own
+    // deckId pointing to its leaf subdeck (e.g. "5.1.2 Excretion…").
+    // We look that up in deckMapRef so time is credited to the right topic.
+    const cardDeck = deckMapRef.current[current.deckId];
+    const cardSubject = cardDeck?.subject ?? deckSubject;
+
+    if (cardSubject) {
+      let topicId = "auto-flashcards";
+
+      if (cardSubject === "biology") {
+        // 1. Card's own subdeck name (most specific — handles parent-deck study)
+        if (cardDeck) {
+          const extracted = extractBioTopicId(cardDeck.name);
+          if (extracted) topicId = extracted;
+        }
+        // 2. The deck being studied directly (handles studying a leaf subdeck)
+        if (topicId === "auto-flashcards" && deckName) {
+          const extracted = extractBioTopicId(deckName);
+          if (extracted) topicId = extracted;
+        }
+      }
+
+      // One session record per topic (bio) or per leaf deck (other subjects).
+      const sessionKey =
+        topicId !== "auto-flashcards"
+          ? `flashcard-auto-${topicId}`
+          : `flashcard-auto-${current.deckId}`;
+
+      sessionMsByTopicRef.current[sessionKey] =
+        (sessionMsByTopicRef.current[sessionKey] ?? 0) + cappedMs;
+
       recordFlashcardStudyTime({
-        deckId,
-        deckSubject,
-        deckName: deckName || undefined,
-        totalSessionMs: sessionMsRef.current,
+        deckSubject: cardSubject,
+        topicId,
+        sessionKey,
+        totalSessionMs: sessionMsByTopicRef.current[sessionKey],
         loggedIn: !!user,
       });
     }

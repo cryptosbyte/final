@@ -2,15 +2,11 @@
  * Adds time spent in a flashcard study session to today's revision entry so
  * it counts toward the day's productivity score.
  *
- * Mechanism: per (deckId × calendar day) we keep a single auto-generated
- * `AnkiSessionRecord` whose id is stable (`flashcard-auto-<deckId>`). Each
- * call to `recordFlashcardStudyTime` overwrites that record's `hours` with
- * the cumulative session total, and ensures the subject has the
- * `anki_flashcards` revision type tagged.
- *
- * Biology decks: if the deck name begins with an OCR A Biology submodule code
- * (e.g. "5.1.1", "3.1.2") the session is linked to that exact topic so it
- * shows up correctly in the productivity log subtopic breakdown.
+ * Each call upserts a single `AnkiSessionRecord` whose id is `sessionKey`.
+ * Callers are responsible for resolving the correct topicId and sessionKey
+ * before calling this function — typically by inspecting the card's own
+ * subdeck name so that studying a parent deck ("Module 5") still logs time
+ * under the correct leaf topic ("5.1.2", "5.2.1", etc.).
  *
  * We update the localStorage cache (so calendar/stats reflect it on next
  * mount) and PUT to the server in one go. The push is fire-and-forget; if
@@ -50,8 +46,8 @@ interface DayEntry {
 
 type RevisionData = Record<string, DayEntry>;
 
-// All valid OCR A Biology submodule IDs from the productivity log.
-const VALID_BIO_TOPIC_IDS = new Set([
+// All valid OCR A Biology submodule IDs used in the productivity log.
+export const VALID_BIO_TOPIC_IDS = new Set([
   "3.1.1","3.1.2","3.1.3",
   "4.1.1","4.2.1","4.2.2",
   "5.1.1","5.1.2","5.1.3","5.1.4","5.1.5",
@@ -62,13 +58,13 @@ const VALID_BIO_TOPIC_IDS = new Set([
 
 /**
  * Extract a biology submodule topic ID from a deck name if one is present.
- * Deck names like "5.1.1 Communication and homeostasis" yield "5.1.1".
- * Returns null when no valid topic code is found.
+ * e.g. "5.1.2 Excretion as an example of homeostatic control" → "5.1.2"
+ * Returns null when no valid OCR A topic code is found at the start.
  */
-function extractBioTopicId(deckName: string): string | null {
+export function extractBioTopicId(deckName: string): string | null {
   const m = deckName.trim().match(/^(\d+\.\d+\.\d+)/);
   if (!m) return null;
-  return VALID_BIO_TOPIC_IDS.has(m[1]) ? m[1] : null;
+  return VALID_BIO_TOPIC_IDS.has(m[1]!) ? m[1]! : null;
 }
 
 function todayKey(): string {
@@ -99,9 +95,23 @@ const SUBJECT_MAP: Record<string, Subject | null> = {
 };
 
 export function recordFlashcardStudyTime(opts: {
-  deckId: string;
+  /**
+   * The subject of the deck ("biology" | "chemistry" | "maths" | "miscellaneous").
+   */
   deckSubject: string;
-  deckName?: string;
+  /**
+   * The resolved biology topic ID (e.g. "5.1.2") or "auto-flashcards" when
+   * the subdeck name does not start with a recognised module code.
+   * For non-biology subjects this field is ignored; callers may pass anything.
+   */
+  topicId: string;
+  /**
+   * Stable unique key for the AnkiSessionRecord being upserted.
+   * Use "flashcard-auto-<topicId>" for biology, "flashcard-auto-<deckId>"
+   * for other subjects, so that different review sessions on the same topic
+   * always accumulate into the same record.
+   */
+  sessionKey: string;
   totalSessionMs: number;
   loggedIn: boolean;
 }): void {
@@ -110,37 +120,22 @@ export function recordFlashcardStudyTime(opts: {
   if (opts.totalSessionMs <= 0) return;
 
   const date = todayKey();
-  const sessionId = `flashcard-auto-${opts.deckId}`;
   const hours = opts.totalSessionMs / 3_600_000;
-
-  // Determine the topicId for biology decks — attempt to match the deck name
-  // to a known submodule code, falling back to "auto-flashcards".
-  let defaultTopicId = "auto-flashcards";
-  if (subject === "biology" && opts.deckName) {
-    const extracted = extractBioTopicId(opts.deckName);
-    if (extracted) defaultTopicId = extracted;
-  }
 
   const all = readAll();
   const day: DayEntry = all[date] ?? { date, subjects: {} };
   const subjEntry: SubjectEntry =
     day.subjects[subject] ?? { types: [], productivity: 0 };
 
-  // Upsert the auto session for this deck.
   const sessions = subjEntry.ankiSessions ? [...subjEntry.ankiSessions] : [];
-  const idx = sessions.findIndex((s) => s.id === sessionId);
+  const idx = sessions.findIndex((s) => s.id === opts.sessionKey);
 
-  // If the existing record already has a user-chosen topicId, preserve it.
-  // Otherwise use the extracted/default one.
-  const topicId =
-    idx >= 0 && sessions[idx].topicId !== "auto-flashcards"
-      ? sessions[idx].topicId
-      : defaultTopicId;
+  const topicId = subject === "biology" ? opts.topicId : opts.topicId;
 
   const next: AnkiSessionRecord = {
-    id: sessionId,
+    id: opts.sessionKey,
     topicId,
-    hours: Math.max(hours, idx >= 0 ? Math.max(sessions[idx].hours, hours) : hours),
+    hours: Math.max(hours, idx >= 0 ? Math.max(sessions[idx]!.hours, hours) : hours),
   };
   if (idx >= 0) sessions[idx] = next; else sessions.push(next);
 
