@@ -1198,6 +1198,160 @@ function StatsSkeleton() {
   );
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Water Stats Section
+// ─────────────────────────────────────────────────────────────────────────────
+
+function WaterStatsSection({ data }: { data: ReturnType<typeof useRevisionData>["data"] }) {
+  const stats = useMemo(() => {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    const last30: number[] = [];
+    const last14Days: { label: string; bottles: number }[] = [];
+
+    for (let i = 29; i >= 0; i--) {
+      const d = subDays(today, i);
+      const key = format(d, "yyyy-MM-dd");
+      const bottles = data[key]?.waterBottles ?? 0;
+      last30.push(bottles);
+      if (i < 14) {
+        last14Days.push({ label: format(d, "d"), bottles });
+      }
+    }
+
+    const loggedDays = last30.filter(b => b > 0);
+    const avgBottles = loggedDays.length > 0
+      ? loggedDays.reduce((a, b) => a + b, 0) / loggedDays.length
+      : 0;
+    const onTargetDays = last30.filter(b => b >= 3 && b <= 4).length;
+    const totalLoggedDays = loggedDays.length;
+
+    const todayKey = format(today, "yyyy-MM-dd");
+    const todayBottles = data[todayKey]?.waterBottles ?? 0;
+
+    return { avgBottles, onTargetDays, totalLoggedDays, last14Days, todayBottles };
+  }, [data]);
+
+  const bottleColor = (n: number) => {
+    if (n === 0) return "hsl(var(--muted-foreground) / 0.25)";
+    if (n < 3) return "hsl(38 95% 55%)";
+    if (n <= 4) return "hsl(199 89% 48%)";
+    return "hsl(199 89% 68%)";
+  };
+
+  const todayMessage = stats.todayBottles === 0
+    ? "Not logged yet today"
+    : stats.todayBottles < 3
+    ? `${stats.todayBottles} bottle${stats.todayBottles === 1 ? "" : "s"} today — aim for 3–4`
+    : stats.todayBottles <= 4
+    ? `${stats.todayBottles} bottles today — right on target`
+    : `${stats.todayBottles} bottles today — well hydrated`;
+
+  return (
+    <div className="max-w-6xl mx-auto space-y-4">
+      <div>
+        <h2 className="text-xl font-semibold text-foreground">Hydration</h2>
+        <p className="text-sm text-muted-foreground mt-0.5">Water bottles tracked per day. 3–4 is the ideal daily target.</p>
+      </div>
+
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        {/* Today */}
+        <div className="bg-card border rounded-xl p-5 shadow-sm flex items-center gap-4">
+          <div
+            className="w-12 h-12 rounded-full grid place-items-center shrink-0"
+            style={{ background: `${bottleColor(stats.todayBottles)}22` }}
+          >
+            <svg viewBox="0 0 14 20" className="w-6 h-9" style={{ fill: bottleColor(stats.todayBottles) }}>
+              <path d="M4 2 L2 6 L2 16 Q2 18 7 18 Q12 18 12 16 L12 6 L10 2 Z" />
+              <rect x="4.5" y="0" width="5" height="2.5" rx="0.8" />
+            </svg>
+          </div>
+          <div>
+            <p className="text-3xl font-bold" style={{ color: bottleColor(stats.todayBottles) }}>
+              {stats.todayBottles > 0 ? stats.todayBottles : "–"}
+            </p>
+            <p className="text-xs text-muted-foreground font-medium uppercase tracking-wider mt-0.5">Today</p>
+            <p className="text-xs text-muted-foreground mt-1">{todayMessage}</p>
+          </div>
+        </div>
+
+        {/* 30-day average */}
+        <div className="bg-card border rounded-xl p-5 shadow-sm flex items-center gap-4">
+          <div className="w-12 h-12 rounded-full grid place-items-center shrink-0 bg-sky-500/10 shrink-0">
+            <svg viewBox="0 0 14 20" className="w-6 h-9 fill-sky-500">
+              <path d="M4 2 L2 6 L2 16 Q2 18 7 18 Q12 18 12 16 L12 6 L10 2 Z" />
+              <rect x="4.5" y="0" width="5" height="2.5" rx="0.8" />
+            </svg>
+          </div>
+          <div>
+            <p className="text-3xl font-bold text-foreground">
+              {stats.avgBottles > 0 ? stats.avgBottles.toFixed(1) : "–"}
+            </p>
+            <p className="text-xs text-muted-foreground font-medium uppercase tracking-wider mt-0.5">Avg / logged day (30d)</p>
+            <p className="text-xs text-muted-foreground mt-1">
+              {stats.totalLoggedDays > 0
+                ? `Based on ${stats.totalLoggedDays} day${stats.totalLoggedDays === 1 ? "" : "s"} with data`
+                : "No water data logged yet"}
+            </p>
+          </div>
+        </div>
+
+        {/* On-target days */}
+        <div className="bg-card border rounded-xl p-5 shadow-sm flex items-center gap-4">
+          <div className="w-12 h-12 rounded-full grid place-items-center shrink-0 bg-emerald-500/10">
+            <svg viewBox="0 0 24 24" className="w-6 h-6 stroke-emerald-500 fill-none" strokeWidth={2}>
+              <polyline points="20 6 9 17 4 12" />
+            </svg>
+          </div>
+          <div>
+            <p className="text-3xl font-bold text-foreground">{stats.onTargetDays}</p>
+            <p className="text-xs text-muted-foreground font-medium uppercase tracking-wider mt-0.5">On-target days (30d)</p>
+            <p className="text-xs text-muted-foreground mt-1">Days with 3–4 bottles logged</p>
+          </div>
+        </div>
+      </div>
+
+      {/* Last 14 days mini chart */}
+      <div className="bg-card border rounded-xl p-5 shadow-sm">
+        <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-4">Last 14 Days</p>
+        <div className="flex items-end gap-1.5 h-20">
+          {stats.last14Days.map(({ label, bottles }) => {
+            const heightPct = bottles > 0 ? Math.max(12, (bottles / 6) * 100) : 4;
+            return (
+              <div key={label} className="flex-1 flex flex-col items-center gap-1" title={`${bottles} bottle${bottles === 1 ? "" : "s"}`}>
+                <div
+                  className="w-full rounded-t-sm transition-all"
+                  style={{
+                    height: `${heightPct}%`,
+                    backgroundColor: bottleColor(bottles),
+                    opacity: bottles === 0 ? 0.3 : 1,
+                  }}
+                />
+                <span className="text-[9px] text-muted-foreground leading-none">{label}</span>
+              </div>
+            );
+          })}
+        </div>
+        <div className="flex items-center gap-4 mt-3 pt-3 border-t border-border/50">
+          <div className="flex items-center gap-1.5">
+            <div className="w-2.5 h-2.5 rounded-sm" style={{ backgroundColor: "hsl(199 89% 48%)" }} />
+            <span className="text-[10px] text-muted-foreground">3–4 (ideal)</span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <div className="w-2.5 h-2.5 rounded-sm" style={{ backgroundColor: "hsl(38 95% 55%)" }} />
+            <span className="text-[10px] text-muted-foreground">1–2 (low)</span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <div className="w-2.5 h-2.5 rounded-sm" style={{ backgroundColor: "hsl(199 89% 68%)" }} />
+            <span className="text-[10px] text-muted-foreground">5–6 (great)</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function StatsPage() {
   const { user, isLoading: authLoading, login } = useAuthContext();
   const { data, syncing, synced } = useRevisionData(user);
@@ -1417,6 +1571,8 @@ export default function StatsPage() {
       <PaperMarksSection data={data} />
 
       <FlashcardsStatsSection user={user} />
+
+      <WaterStatsSection data={data} />
     </div>
   );
 }

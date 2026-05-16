@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useLayoutEffect } from "react";
+import { useState, useEffect, useRef, useLayoutEffect, useMemo } from "react";
 import { format, parseISO } from "date-fns";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -288,11 +288,15 @@ function ExamPracticeContent({
   records,
   onChange,
   dayAlreadyLogged = false,
+  allData,
+  currentDate,
 }: {
   subject: "biology" | "chemistry" | "maths";
   records: ExamPaperRecord[];
   onChange: (records: ExamPaperRecord[]) => void;
   dayAlreadyLogged?: boolean;
+  allData?: RevisionData;
+  currentDate?: string;
 }) {
   const papers = EXAM_PAPERS[subject];
   const colorVar = subject === "biology" ? "--biology" : subject === "chemistry" ? "--chemistry" : "--maths";
@@ -302,10 +306,41 @@ function ExamPracticeContent({
     () => dayAlreadyLogged && nonCustomCount === 0,
   );
 
+  // Build a set of "year:paper" keys that were completed on ANY other day.
+  // These checkboxes become greyed-out — already done, can't redo.
+  const historicallyDone = useMemo((): Set<string> => {
+    if (!allData || !currentDate) return new Set();
+    const done = new Set<string>();
+    for (const [entryDate, dayEntry] of Object.entries(allData)) {
+      if (entryDate === currentDate) continue;
+      const recs = dayEntry.subjects?.[subject]?.examPaperRecords;
+      if (!recs) continue;
+      for (const r of recs) {
+        if (!r.isCustom && r.completed && r.year) {
+          done.add(`${r.year}:${r.paper}`);
+        }
+      }
+    }
+    return done;
+  }, [allData, currentDate, subject]);
+
+  // Years where every paper is historically done AND none are in today's records
+  // are removed from the list entirely.
+  const visibleYears = useMemo(() => {
+    return EXAM_YEARS.filter(year => {
+      const allHistoricallyDone = papers.every(p => historicallyDone.has(`${year}:${p}`));
+      if (!allHistoricallyDone) return true;
+      // Keep if today's entry already has a record for this year
+      const todayHasAny = records.some(r => !r.isCustom && r.year === year);
+      return todayHasAny;
+    });
+  }, [historicallyDone, records, papers]);
+
   const getRecord = (year: number, paper: string) =>
     records.find(r => !r.isCustom && r.year === year && r.paper === paper);
 
   const toggleYearPaper = (year: number, paper: string) => {
+    if (historicallyDone.has(`${year}:${paper}`)) return; // already done elsewhere
     const existing = getRecord(year, paper);
     if (existing) {
       onChange(records.filter(r => r.id !== existing.id));
@@ -331,11 +366,15 @@ function ExamPracticeContent({
     onChange([...records, rec]);
   };
 
-  const boxCls = (checked: boolean) =>
-    `flex-shrink-0 w-3.5 h-3.5 rounded border flex items-center justify-center transition-colors cursor-pointer select-none ${
-      checked
-        ? `bg-[hsl(var(${colorVar}))] border-[hsl(var(${colorVar}))]`
-        : "border-border bg-background hover:border-muted-foreground"
+  const boxCls = (checked: boolean, disabled = false) =>
+    `flex-shrink-0 w-3.5 h-3.5 rounded border flex items-center justify-center transition-colors select-none ${
+      disabled
+        ? checked
+          ? "bg-muted border-muted-foreground/30 cursor-not-allowed opacity-50"
+          : "border-border/40 bg-muted/50 cursor-not-allowed opacity-40"
+        : checked
+          ? `bg-[hsl(var(${colorVar}))] border-[hsl(var(${colorVar}))] cursor-pointer`
+          : "border-border bg-background hover:border-muted-foreground cursor-pointer"
     }`;
 
   const Tick = () => (
@@ -390,18 +429,23 @@ function ExamPracticeContent({
             </tr>
           </thead>
           <tbody>
-            {EXAM_YEARS.map(year => (
+            {visibleYears.map(year => (
               <tr key={year} className="border-t border-border/30">
                 <td className="pr-4 text-xs font-medium text-foreground align-top pt-2.5">{year}</td>
                 {papers.map(paper => {
                   const rec = getRecord(year, paper);
+                  const alreadyDone = historicallyDone.has(`${year}:${paper}`);
                   return (
                     <td key={paper} className="py-1.5 pr-5 align-top">
                       <div className="flex flex-col gap-1.5">
-                        <span onClick={() => toggleYearPaper(year, paper)} className={boxCls(!!rec)}>
-                          {rec && <Tick />}
+                        <span
+                          onClick={() => toggleYearPaper(year, paper)}
+                          className={boxCls(!!rec || alreadyDone, alreadyDone)}
+                          title={alreadyDone ? "Already completed on another day" : undefined}
+                        >
+                          {(rec || alreadyDone) && <Tick />}
                         </span>
-                        {rec && (
+                        {rec && !alreadyDone && (
                           <div className="flex items-center gap-0.5">
                             <MarksInput id={rec.id} field="marksObtained" value={rec.marksObtained} />
                             <span className="text-muted-foreground text-xs">/</span>
@@ -702,6 +746,7 @@ function MathsModuleContent({
 export function DayEntryModal({ date, anchorRect, existingEntry, allData, onClose, onSave }: DayEntryModalProps) {
   const [subjects, setSubjects] = useState<Partial<Record<Subject, SubjectEntry>>>({});
   const [notes, setNotes] = useState("");
+  const [waterBottles, setWaterBottles] = useState<number>(0);
   const [confettiTrigger, setConfettiTrigger] = useState(0);
   // Guard against re-firing the productivity-record celebration when the user
   // saves the same day repeatedly without changing the rating (or rapid
@@ -712,9 +757,11 @@ export function DayEntryModal({ date, anchorRect, existingEntry, allData, onClos
     if (existingEntry) {
       setSubjects(existingEntry.subjects || {});
       setNotes(existingEntry.notes || "");
+      setWaterBottles(existingEntry.waterBottles ?? 0);
     } else {
       setSubjects({});
       setNotes("");
+      setWaterBottles(0);
     }
   }, [existingEntry, date]);
 
@@ -885,7 +932,8 @@ export function DayEntryModal({ date, anchorRect, existingEntry, allData, onClos
     onSave(date, {
       date,
       subjects: filteredSubjects,
-      notes: notes.trim()
+      notes: notes.trim(),
+      waterBottles: waterBottles > 0 ? waterBottles : undefined,
     });
 
     if (newMax > 0 && newMax > prevMax && newMax > lastRecordRatingRef.current) {
@@ -1055,6 +1103,8 @@ export function DayEntryModal({ date, anchorRect, existingEntry, allData, onClos
                       records={examPaperRecords}
                       onChange={(recs) => setExamPaperRecords(subject, recs)}
                       dayAlreadyLogged={!!existingEntry}
+                      allData={allData}
+                      currentDate={date}
                     />
                   </div>
                 )}
@@ -1146,6 +1196,49 @@ export function DayEntryModal({ date, anchorRect, existingEntry, allData, onClos
               minRows={3}
               testId="notes-general"
             />
+          </div>
+
+          {/* Water intake tracker */}
+          <div className="space-y-3 px-1 pt-2">
+            <div className="flex items-center justify-between">
+              <Label className="text-xs text-muted-foreground uppercase tracking-wider">Water Bottles</Label>
+              <span className="text-[10px] text-muted-foreground">3–4 is ideal</span>
+            </div>
+            <div className="flex items-center gap-1.5 flex-wrap">
+              {[0, 1, 2, 3, 4, 5, 6].map(n => {
+                const isIdeal = n >= 3 && n <= 4;
+                const isSelected = waterBottles === n;
+                const isFilled = n > 0 && n <= waterBottles;
+                return (
+                  <button
+                    key={n}
+                    type="button"
+                    onClick={() => setWaterBottles(n === waterBottles ? 0 : n)}
+                    data-testid={`water-bottle-${n}`}
+                    title={n === 0 ? "None" : `${n} bottle${n === 1 ? "" : "s"}`}
+                    className={`flex flex-col items-center gap-0.5 px-2 py-1.5 rounded-lg border text-xs font-medium transition-all select-none
+                      ${isSelected
+                        ? isIdeal
+                          ? "bg-sky-500 border-sky-500 text-white"
+                          : n < 3
+                            ? "bg-amber-400 border-amber-400 text-white"
+                            : "bg-sky-300 border-sky-300 text-white"
+                        : "border-border bg-background text-muted-foreground hover:bg-secondary"
+                      }`}
+                  >
+                    <svg
+                      viewBox="0 0 14 20"
+                      className={`w-3.5 h-5 transition-colors ${isFilled || isSelected ? "fill-current" : "fill-none stroke-current"}`}
+                      strokeWidth={isFilled || isSelected ? 0 : 1.5}
+                    >
+                      <path d="M4 2 L2 6 L2 16 Q2 18 7 18 Q12 18 12 16 L12 6 L10 2 Z" />
+                      <rect x="4.5" y="0" width="5" height="2.5" rx="0.8" />
+                    </svg>
+                    <span className="leading-none">{n === 0 ? "–" : n}</span>
+                  </button>
+                );
+              })}
+            </div>
           </div>
         </div>
 

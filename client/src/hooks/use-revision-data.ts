@@ -35,6 +35,7 @@ export interface DayEntry {
   date: string;
   subjects: Partial<Record<Subject, SubjectEntry>>;
   notes?: string;
+  waterBottles?: number;
 }
 
 export type RevisionData = Record<string, DayEntry>;
