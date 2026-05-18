@@ -25,6 +25,8 @@ import { useTodoCountsByDeadline, useTodos, updateTodoLocal } from "@/hooks/use-
 import { useEvents } from "@/hooks/use-events";
 import { startOfDay } from "date-fns";
 import { TodoPanel } from "@/components/todo-panel";
+import { useQuranPlan, getPagesForDate } from "@/hooks/use-quran-plan";
+import { QuranSetupModal } from "@/components/quran-setup-modal";
 
 export default function CalendarPage() {
   const [currentMonth, setCurrentMonth] = useState(() => startOfMonth(new Date()));
@@ -45,6 +47,8 @@ export default function CalendarPage() {
   const allTodos = useTodos();
   const allEvents = useEvents();
   const todayStart = startOfDay(new Date());
+  const [quranModalOpen, setQuranModalOpen] = useState(false);
+  const { plan: quranPlan } = useQuranPlan();
 
   useEffect(() => {
     if (synced && uploadedCount > 0) {
@@ -193,6 +197,18 @@ export default function CalendarPage() {
             )}
           </div>
           <div className="flex items-center gap-1.5">
+            <button
+              onClick={() => setQuranModalOpen(true)}
+              className="px-3.5 py-1.5 rounded-full text-[12px] font-semibold transition-opacity hover:opacity-80 flex items-center gap-1.5"
+              style={{
+                background: quranPlan ? "hsl(199 89% 48% / 0.12)" : "hsl(var(--secondary) / 0.8)",
+                color: quranPlan ? "hsl(199 89% 48%)" : "hsl(var(--muted-foreground))",
+                border: quranPlan ? "1px solid hsl(199 89% 48% / 0.25)" : "1px solid transparent",
+              }}
+              title="Quran completion plan"
+            >
+              🌙 Khatm
+            </button>
             <button
               onClick={goToToday}
               className="px-3.5 py-1.5 rounded-full text-[12px] font-semibold transition-opacity hover:opacity-80"
@@ -398,6 +414,27 @@ export default function CalendarPage() {
                           Notes…
                         </div>
                       )}
+
+                      {/* Quran completion chip */}
+                      {isCurrentMonth && quranPlan && (() => {
+                        const isDone = quranPlan.completedDates.includes(dateStr);
+                        const pages = !isDone ? getPagesForDate(quranPlan, dateStr) : 0;
+                        if (isDone) {
+                          return (
+                            <div className="w-full text-left px-1.5 py-0.5 rounded-md text-[10px] md:text-[10.5px] font-semibold truncate" style={{ background: "hsl(199 89% 48% / 0.12)", color: "hsl(199 89% 48%)" }}>
+                              📖 Done
+                            </div>
+                          );
+                        }
+                        if (pages > 0) {
+                          return (
+                            <div className="w-full text-left px-1.5 py-0.5 rounded-md text-[10px] md:text-[10.5px] font-semibold truncate" style={{ background: "hsl(199 89% 48% / 0.08)", color: "hsl(199 89% 42%)" }}>
+                              📖 {pages}p
+                            </div>
+                          );
+                        }
+                        return null;
+                      })()}
                     </div>
                   </button>
                 );
@@ -424,6 +461,8 @@ export default function CalendarPage() {
         anchorRect={timelineAnchorRect}
         onClose={closeTimeline}
       />
+
+      <QuranSetupModal open={quranModalOpen} onClose={() => setQuranModalOpen(false)} />
     </div>
   );
 }

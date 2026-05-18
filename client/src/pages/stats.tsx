@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { format, parseISO, startOfMonth, endOfMonth, isWithinInterval, startOfWeek, endOfWeek, eachDayOfInterval, differenceInCalendarDays, subDays, addDays, isToday } from "date-fns";
 import { useTodos } from "@/hooks/use-todos";
 import { getNextExamForSubject, ExamSubject, EXAM_DATES } from "@/lib/exam-dates";
@@ -22,6 +22,8 @@ import {
 import { useRevisionData, Subject, ExamPaperRecord, SubjectEntry, DayEntry } from "@/hooks/use-revision-data";
 import { useAuthContext } from "@/lib/auth-context";
 import { FlashcardsStatsSection } from "@/components/flashcards-stats-section";
+import { useQuranPlan, getPlanProgress, getPagesForDate, getPageRangeForDate, getSurahsForPageRange, QURAN_TOTAL_PAGES } from "@/hooks/use-quran-plan";
+import { QuranSetupModal } from "@/components/quran-setup-modal";
 
 const SUBJECTS: { id: Subject; name: string; color: string }[] = [
   { id: "biology", name: "Biology", color: "hsl(var(--biology))" },
@@ -1199,6 +1201,169 @@ function StatsSkeleton() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Quran Progress Section
+// ─────────────────────────────────────────────────────────────────────────────
+
+function QuranProgressSection() {
+  const { plan, markDone, unmarkDone } = useQuranPlan();
+  const [quranModalOpen, setQuranModalOpen] = useState(false);
+
+  if (!plan) {
+    return (
+      <div className="max-w-6xl mx-auto space-y-4">
+        <div className="flex items-center justify-between">
+          <div>
+            <h2 className="text-xl font-semibold text-foreground">Quran Completion</h2>
+            <p className="text-sm text-muted-foreground mt-0.5">Track your Khatm Al-Quran progress.</p>
+          </div>
+          <button
+            onClick={() => setQuranModalOpen(true)}
+            className="px-4 py-2 rounded-full text-sm font-semibold transition-colors"
+            style={{ background: "hsl(199 89% 48% / 0.12)", color: "hsl(199 89% 48%)" }}
+          >
+            🌙 Set up plan
+          </button>
+        </div>
+        <div className="rounded-2xl border border-dashed border-border/60 bg-secondary/20 p-8 text-center">
+          <p className="text-3xl mb-2" aria-hidden>📖</p>
+          <p className="text-sm font-semibold text-foreground">No Khatm plan yet</p>
+          <p className="text-xs text-muted-foreground mt-1">Set up a plan to track your daily Quran reading progress.</p>
+        </div>
+        <QuranSetupModal open={quranModalOpen} onClose={() => setQuranModalOpen(false)} />
+      </div>
+    );
+  }
+
+  const progress = getPlanProgress(plan);
+  const todayStr = new Date().toISOString().slice(0, 10);
+  const isTodayDone = plan.completedDates.includes(todayStr);
+  const pagesToday = getPagesForDate(plan, todayStr);
+  const rangeToday = getPageRangeForDate(plan, todayStr);
+  const surahsToday = rangeToday ? getSurahsForPageRange(rangeToday.start, rangeToday.end) : null;
+
+  // Last 14 days chart data
+  const last14 = Array.from({ length: 14 }, (_, i) => {
+    const d = new Date(todayStr);
+    d.setDate(d.getDate() - (13 - i));
+    const ds = d.toISOString().slice(0, 10);
+    return {
+      label: format(parseISO(ds), "d"),
+      done: plan.completedDates.includes(ds) ? 1 : 0,
+      dateStr: ds,
+    };
+  });
+
+  return (
+    <div className="max-w-6xl mx-auto space-y-4">
+      <div className="flex items-center justify-between gap-4 flex-wrap">
+        <div>
+          <h2 className="text-xl font-semibold text-foreground">Quran Completion</h2>
+          <p className="text-sm text-muted-foreground mt-0.5">
+            {plan.totalDays}-day Khatm plan · {plan.pagesPerDay} pages/day
+          </p>
+        </div>
+        <button
+          onClick={() => setQuranModalOpen(true)}
+          className="px-4 py-2 rounded-full text-sm font-semibold transition-colors shrink-0"
+          style={{ background: "hsl(199 89% 48% / 0.12)", color: "hsl(199 89% 48%)" }}
+        >
+          🌙 Manage plan
+        </button>
+      </div>
+
+      {/* Stats cards */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        {[
+          { label: "Progress", value: `${progress.pctComplete}%`, sub: `${progress.pagesRead} / ${QURAN_TOTAL_PAGES} pages` },
+          { label: "Days done", value: `${progress.totalCompleted}`, sub: `of ${plan.totalDays} days` },
+          { label: "Streak", value: `${progress.streak}`, sub: "consecutive days 🔥" },
+          { label: "Today", value: isTodayDone ? "Done ✓" : pagesToday > 0 ? `${pagesToday}p due` : "On track", sub: isTodayDone ? "All caught up" : surahsToday ?? "Within plan range" },
+        ].map(c => (
+          <div key={c.label} className="rounded-2xl border border-border/60 bg-secondary/30 px-4 py-4 space-y-1">
+            <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">{c.label}</p>
+            <p className="text-2xl font-bold text-foreground leading-tight">{c.value}</p>
+            <p className="text-xs text-muted-foreground truncate">{c.sub}</p>
+          </div>
+        ))}
+      </div>
+
+      {/* Progress bar */}
+      <div className="rounded-2xl border border-border/60 bg-secondary/30 px-5 py-4 space-y-2">
+        <div className="flex justify-between text-xs text-muted-foreground">
+          <span>Al-Fatiha</span>
+          <span>{progress.pctComplete}% complete</span>
+          <span>An-Nas</span>
+        </div>
+        <div className="h-3 rounded-full bg-border/50 overflow-hidden">
+          <div
+            className="h-full rounded-full transition-all duration-700"
+            style={{
+              width: `${progress.pctComplete}%`,
+              background: progress.pctComplete >= 100
+                ? "linear-gradient(90deg, hsl(142 76% 45%), hsl(199 89% 48%))"
+                : "linear-gradient(90deg, hsl(199 89% 48%), hsl(260 80% 60%))",
+            }}
+          />
+        </div>
+        {progress.isKhatmDone && (
+          <p className="text-xs text-center font-semibold" style={{ color: "hsl(199 89% 48%)" }}>
+            🌙 Khatm Complete — Alhamdulillah! ✨
+          </p>
+        )}
+      </div>
+
+      {/* 14-day reading chart */}
+      <div className="rounded-2xl border border-border/60 bg-secondary/30 px-5 py-4">
+        <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-3">Last 14 days</p>
+        <div className="flex gap-1.5 items-end h-12">
+          {last14.map(d => (
+            <button
+              key={d.dateStr}
+              onClick={() => d.done ? unmarkDone(d.dateStr) : markDone(d.dateStr)}
+              title={`${format(parseISO(d.dateStr), "EEE d MMM")} — ${d.done ? "Done ✓" : "Not done"}`}
+              className="flex-1 rounded-sm transition-all hover:opacity-80 min-h-[4px]"
+              style={{
+                height: d.done ? "100%" : d.dateStr < todayStr ? "28%" : "18%",
+                background: d.done
+                  ? "hsl(199 89% 48%)"
+                  : d.dateStr < todayStr
+                    ? "hsl(var(--destructive) / 0.3)"
+                    : "hsl(var(--border))",
+              }}
+            />
+          ))}
+        </div>
+        <div className="flex justify-between text-[10px] text-muted-foreground mt-1.5">
+          <span>{format(parseISO(last14[0].dateStr), "d MMM")}</span>
+          <span>Today</span>
+        </div>
+      </div>
+
+      {/* Today's reading CTA if applicable */}
+      {!isTodayDone && pagesToday > 0 && (
+        <div className="rounded-2xl border border-sky-500/30 bg-sky-500/6 px-5 py-4 flex items-center justify-between gap-4">
+          <div>
+            <p className="text-sm font-semibold text-foreground">
+              Today: read {pagesToday} page{pagesToday !== 1 ? "s" : ""}
+              {rangeToday && <span className="font-normal text-muted-foreground"> (pp. {rangeToday.start}–{rangeToday.end})</span>}
+            </p>
+            {surahsToday && <p className="text-xs text-muted-foreground mt-0.5">{surahsToday}</p>}
+          </div>
+          <button
+            onClick={() => markDone(todayStr)}
+            className="shrink-0 px-4 py-2 rounded-full text-sm font-semibold bg-sky-500 text-white hover:bg-sky-600 transition-colors"
+          >
+            Mark done
+          </button>
+        </div>
+      )}
+
+      <QuranSetupModal open={quranModalOpen} onClose={() => setQuranModalOpen(false)} />
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Water Stats Section
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -1571,6 +1736,8 @@ export default function StatsPage() {
       <PaperMarksSection data={data} />
 
       <FlashcardsStatsSection user={user} />
+
+      <QuranProgressSection />
 
       <WaterStatsSection data={data} />
     </div>

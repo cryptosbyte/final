@@ -12,6 +12,7 @@ import { useDeviceSync } from "@/hooks/use-device-sync";
 import { getDeviceId, getDeviceLabel } from "@/lib/device-sync";
 import { DailyQuote } from "@/components/daily-quote";
 import { AchievementOverlay } from "@/components/achievement-overlay";
+import { QuranCelebrationOverlay } from "@/components/quran-celebration";
 import { Cloud, CloudOff } from "lucide-react";
 
 interface LayoutProps {
@@ -194,6 +195,7 @@ export function Layout({ children }: LayoutProps) {
         {children}
       </main>
       <AchievementOverlay />
+      <QuranCelebrationOverlay />
     </div>
   );
 }
