@@ -2,11 +2,11 @@ import { useState, useEffect } from "react";
 import { createPortal } from "react-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import { format, parseISO, differenceInCalendarDays } from "date-fns";
-import { X, Trash2, CheckCircle2, Circle, RotateCcw } from "lucide-react";
+import { X, Trash2, CheckCircle2, Circle, RotateCcw, BookOpen } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   useQuranPlan, getPlanProgress, getPagesForDate, getPageRangeForDate,
-  getSurahsForPageRange, QURAN_TOTAL_PAGES,
+  getSurahsForPageRange, QURAN_TOTAL_PAGES, getTotalPagesRead,
 } from "@/hooks/use-quran-plan";
 
 const PRESETS = [
@@ -33,9 +33,15 @@ export function QuranSetupModal({ open, onClose }: Props) {
   const [useCustom, setUseCustom] = useState(false);
   const [startDate, setStartDate] = useState(todayStr());
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [pagesInput, setPagesInput] = useState("");
+  const [showPagesInput, setShowPagesInput] = useState(false);
 
   useEffect(() => {
-    if (open) { setConfirmDelete(false); }
+    if (open) {
+      setConfirmDelete(false);
+      setShowPagesInput(false);
+      setPagesInput("");
+    }
   }, [open]);
 
   const totalDays = useCustom ? (parseInt(customDays) || 0) : selectedDays;
@@ -50,13 +56,18 @@ export function QuranSetupModal({ open, onClose }: Props) {
   const surahsToday = rangeToday
     ? getSurahsForPageRange(rangeToday.start, rangeToday.end)
     : null;
-  const isTodayDone = plan?.completedDates.includes(today) ?? false;
+  const isTodayDone = plan
+    ? ((plan.dailyPages ?? {})[today] !== undefined || (plan.completedDates ?? []).includes(today))
+    : false;
   const dayIndexToday = plan
     ? differenceInCalendarDays(parseISO(today), parseISO(plan.startDate)) + 1
     : 0;
   const planInProgress = plan
     ? dayIndexToday >= 1 && dayIndexToday <= plan.totalDays
     : false;
+
+  // Dynamic daily target (recalculated pages remaining / days remaining)
+  const dynamicTarget = plan ? pagesToday : 0;
 
   // Last 7 days of the plan for the mini log
   const recentDays = plan
@@ -66,9 +77,30 @@ export function QuranSetupModal({ open, onClose }: Props) {
         const ds = d.toISOString().slice(0, 10);
         const di = differenceInCalendarDays(parseISO(ds), parseISO(plan.startDate)) + 1;
         if (di < 1 || di > plan.totalDays) return null;
-        return { dateStr: ds, dayIndex: di, done: plan.completedDates.includes(ds) };
+        const logged = (plan.dailyPages ?? {})[ds] !== undefined || (plan.completedDates ?? []).includes(ds);
+        const pagesLogged = (plan.dailyPages ?? {})[ds];
+        return { dateStr: ds, dayIndex: di, done: logged, pagesLogged };
       }).filter(Boolean)
     : [];
+
+  function handleMarkDone() {
+    if (!plan) return;
+    if (showPagesInput) {
+      const pages = parseInt(pagesInput);
+      if (isNaN(pages) || pages < 1) return;
+      markDone(today, Math.min(pages, QURAN_TOTAL_PAGES));
+      setShowPagesInput(false);
+      setPagesInput("");
+    } else {
+      setShowPagesInput(true);
+      setPagesInput(String(dynamicTarget > 0 ? dynamicTarget : plan.pagesPerDay));
+    }
+  }
+
+  function handleMarkDoneQuick() {
+    if (!plan) return;
+    markDone(today, dynamicTarget > 0 ? dynamicTarget : plan.pagesPerDay);
+  }
 
   if (typeof document === "undefined") return null;
 
@@ -236,8 +268,12 @@ export function QuranSetupModal({ open, onClose }: Props) {
                         <span className="font-semibold">{progress.streak} day{progress.streak !== 1 ? "s" : ""} 🔥</span>
                       </div>
                       <div className="flex justify-between">
-                        <span className="text-muted-foreground">Pages/day</span>
-                        <span className="font-semibold">{plan.pagesPerDay}</span>
+                        <span className="text-muted-foreground">Today's target</span>
+                        <span className="font-semibold text-sky-500">
+                          {isTodayDone
+                            ? `${(plan.dailyPages ?? {})[today] ?? plan.pagesPerDay} pages ✓`
+                            : `${dynamicTarget > 0 ? dynamicTarget : plan.pagesPerDay} pages`}
+                        </span>
                       </div>
                     </div>
                   </div>
@@ -253,7 +289,7 @@ export function QuranSetupModal({ open, onClose }: Props) {
                         </p>
                         {isTodayDone ? (
                           <p className="text-sm font-semibold text-emerald-600 dark:text-emerald-400">
-                            ✓ Today&apos;s reading done
+                            ✓ Today's reading done — {(plan.dailyPages ?? {})[today] ?? plan.pagesPerDay} pages logged
                           </p>
                         ) : pagesToday > 0 ? (
                           <>
@@ -268,30 +304,95 @@ export function QuranSetupModal({ open, onClose }: Props) {
                             {surahsToday && (
                               <p className="text-xs text-muted-foreground mt-0.5 truncate">{surahsToday}</p>
                             )}
-                            {pagesToday > plan.pagesPerDay && (
-                              <p className="text-xs text-amber-600 dark:text-amber-400 mt-1">
-                                Includes {pagesToday - plan.pagesPerDay} catch-up pages from missed days
-                              </p>
-                            )}
+                            <p className="text-[11px] text-sky-600 dark:text-sky-400 mt-1">
+                              Target auto-adjusts based on your remaining pages &amp; days
+                            </p>
                           </>
                         ) : (
                           <p className="text-sm text-muted-foreground">All caught up for today!</p>
                         )}
                       </div>
-                      <button
-                        onClick={() => isTodayDone ? unmarkDone(today) : markDone(today)}
-                        className={`shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold transition-colors ${
-                          isTodayDone
-                            ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/25"
-                            : "bg-sky-500 text-white hover:bg-sky-600"
-                        }`}
-                      >
-                        {isTodayDone
-                          ? <><CheckCircle2 className="w-3.5 h-3.5" /> Done</>
-                          : <><Circle className="w-3.5 h-3.5" /> Mark done</>
-                        }
-                      </button>
+
+                      {!isTodayDone && (
+                        <button
+                          onClick={() => unmarkDone(today)}
+                          className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/25 transition-colors"
+                        >
+                          <CheckCircle2 className="w-3.5 h-3.5" /> Done
+                        </button>
+                      )}
+                      {isTodayDone && (
+                        <button
+                          onClick={() => unmarkDone(today)}
+                          className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold bg-secondary text-muted-foreground hover:bg-secondary/70 transition-colors"
+                        >
+                          Undo
+                        </button>
+                      )}
                     </div>
+
+                    {/* Pages input row */}
+                    {!isTodayDone && (
+                      <div className="mt-3 pt-3 border-t border-border/40">
+                        {showPagesInput ? (
+                          <div className="flex items-center gap-2">
+                            <BookOpen className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
+                            <input
+                              type="number"
+                              min={1}
+                              max={QURAN_TOTAL_PAGES}
+                              value={pagesInput}
+                              onChange={e => setPagesInput(e.target.value)}
+                              onKeyDown={e => {
+                                if (e.key === "Enter") handleMarkDone();
+                                if (e.key === "Escape") { setShowPagesInput(false); setPagesInput(""); }
+                              }}
+                              placeholder="Pages read today"
+                              className="flex-1 h-8 px-3 text-sm border border-border rounded-lg bg-background"
+                              autoFocus
+                            />
+                            <button
+                              onClick={handleMarkDone}
+                              disabled={!pagesInput || parseInt(pagesInput) < 1}
+                              className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-sky-500 text-white disabled:opacity-50 hover:bg-sky-600"
+                            >
+                              Log
+                            </button>
+                            <button
+                              onClick={handleMarkDoneQuick}
+                              className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-secondary text-foreground hover:bg-secondary/70"
+                              title={`Log ${dynamicTarget > 0 ? dynamicTarget : plan.pagesPerDay} pages (today's target)`}
+                            >
+                              Log {dynamicTarget > 0 ? dynamicTarget : plan.pagesPerDay}
+                            </button>
+                            <button
+                              onClick={() => { setShowPagesInput(false); setPagesInput(""); }}
+                              className="p-1.5 rounded-lg text-muted-foreground hover:bg-secondary"
+                            >
+                              <X className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        ) : (
+                          <div className="flex items-center gap-2">
+                            <button
+                              onClick={handleMarkDoneQuick}
+                              className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-xs font-semibold bg-sky-500 text-white hover:bg-sky-600 transition-colors"
+                            >
+                              <Circle className="w-3.5 h-3.5" />
+                              Mark done ({dynamicTarget > 0 ? dynamicTarget : plan.pagesPerDay} pages)
+                            </button>
+                            <button
+                              onClick={() => { setShowPagesInput(true); setPagesInput(""); }}
+                              className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold bg-secondary text-foreground hover:bg-secondary/70 transition-colors"
+                              title="Log a different number of pages"
+                            >
+                              <BookOpen className="w-3.5 h-3.5" />
+                              Custom
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
                 )}
 
@@ -314,8 +415,8 @@ export function QuranSetupModal({ open, onClose }: Props) {
                         <button
                           key={d.dateStr}
                           onClick={() => d.done ? unmarkDone(d.dateStr) : markDone(d.dateStr)}
-                          title={`Day ${d.dayIndex} · ${format(parseISO(d.dateStr), "EEE d MMM")}${d.done ? " (done)" : ""}`}
-                          className={`flex flex-col items-center gap-0.5 w-10 py-1.5 rounded-lg border text-[10px] font-semibold transition-all ${
+                          title={`Day ${d.dayIndex} · ${format(parseISO(d.dateStr), "EEE d MMM")}${d.done ? ` (${d.pagesLogged ?? plan.pagesPerDay} pages)` : ""}`}
+                          className={`flex flex-col items-center gap-0.5 w-11 py-1.5 rounded-lg border text-[10px] font-semibold transition-all ${
                             d.done
                               ? "bg-emerald-500/15 border-emerald-500/30 text-emerald-600 dark:text-emerald-400"
                               : d.dateStr < today
@@ -324,7 +425,9 @@ export function QuranSetupModal({ open, onClose }: Props) {
                           }`}
                         >
                           <span>{format(parseISO(d.dateStr), "EEE")}</span>
-                          <span>{d.done ? "✓" : d.dateStr < today ? "✗" : "·"}</span>
+                          {d.done
+                            ? <span className="text-[9px]">{d.pagesLogged ?? plan.pagesPerDay}p</span>
+                            : <span>{d.dateStr < today ? "✗" : "·"}</span>}
                         </button>
                       ))}
                     </div>
@@ -334,7 +437,7 @@ export function QuranSetupModal({ open, onClose }: Props) {
                 {/* Plan info */}
                 <div className="text-xs text-muted-foreground border-t border-border/50 pt-3 flex justify-between gap-2 flex-wrap">
                   <span>Started {format(parseISO(plan.startDate), "d MMM yyyy")}</span>
-                  <span>{plan.totalDays} day plan</span>
+                  <span>{plan.totalDays} day plan · {QURAN_TOTAL_PAGES - getTotalPagesRead(plan)} pages remaining</span>
                 </div>
 
                 {/* Delete */}

@@ -10,6 +10,7 @@ export interface QuranPlan {
   totalDays: number;
   pagesPerDay: number;
   completedDates: string[];
+  dailyPages: Record<string, number>;
   completedAt?: string;
 }
 
@@ -64,43 +65,66 @@ export function getSurahsForPageRange(startPage: number, endPage: number): strin
 
 // ─── Pages-due calculation ────────────────────────────────────────────────────
 
+/** Total pages actually read across all logged days. */
+export function getTotalPagesRead(plan: QuranPlan): number {
+  const fromDailyPages = Object.values(plan.dailyPages ?? {}).reduce((sum, p) => sum + p, 0);
+  // Backward-compat: completedDates entries that have no dailyPages entry
+  const legacyDates = (plan.completedDates ?? []).filter(d => !(plan.dailyPages ?? {})[d]);
+  const fromLegacy = legacyDates.length * plan.pagesPerDay;
+  return Math.min(QURAN_TOTAL_PAGES, fromDailyPages + fromLegacy);
+}
+
 /**
- * Returns how many pages the user should read on `dateStr` to stay on track,
- * accounting for any previously missed days (compound carry-over).
- * Returns 0 if the date is outside the plan window or already caught up.
+ * Returns the recommended pages for `dateStr` dynamically, recalculating
+ * based on how many pages remain and how many days are left.
  */
 export function getPagesForDate(plan: QuranPlan, dateStr: string): number {
   const startDate = parseISO(plan.startDate);
   const date = parseISO(dateStr);
   const dayIndex = differenceInCalendarDays(date, startDate) + 1;
   if (dayIndex < 1 || dayIndex > plan.totalDays) return 0;
-  const completedUpToDate = plan.completedDates.filter(d => d <= dateStr).length;
-  const pagesExpected = Math.min(dayIndex * plan.pagesPerDay, QURAN_TOTAL_PAGES);
-  const pagesRead = Math.min(completedUpToDate * plan.pagesPerDay, QURAN_TOTAL_PAGES);
-  return Math.max(0, pagesExpected - pagesRead);
+
+  const totalRead = getTotalPagesRead(plan);
+  const remaining = Math.max(0, QURAN_TOTAL_PAGES - totalRead);
+  if (remaining === 0) return 0;
+
+  // Has today already been logged?
+  const todayLogged = (plan.dailyPages ?? {})[dateStr] !== undefined ||
+    (plan.completedDates ?? []).includes(dateStr);
+  if (todayLogged) return 0;
+
+  // Days left including today
+  const daysLeft = Math.max(1, plan.totalDays - dayIndex + 1);
+  return Math.ceil(remaining / daysLeft);
 }
 
 /**
- * Returns the page range that SHOULD have been read by `dateStr` in order,
- * i.e. the next unread chunk considering already completed days.
+ * Returns the page range that SHOULD be read on `dateStr`.
  */
 export function getPageRangeForDate(plan: QuranPlan, dateStr: string): { start: number; end: number } | null {
   const pages = getPagesForDate(plan, dateStr);
   if (pages === 0) return null;
-  const completedUpToDate = plan.completedDates.filter(d => d <= dateStr).length;
-  const startPage = completedUpToDate * plan.pagesPerDay + 1;
+  const totalRead = getTotalPagesRead(plan);
+  const startPage = totalRead + 1;
   const endPage = Math.min(startPage + pages - 1, QURAN_TOTAL_PAGES);
   return { start: startPage, end: endPage };
 }
 
 /** Progress stats for the entire plan. */
 export function getPlanProgress(plan: QuranPlan) {
-  const totalCompleted = plan.completedDates.length;
-  const pagesRead = Math.min(totalCompleted * plan.pagesPerDay, QURAN_TOTAL_PAGES);
+  const pagesRead = getTotalPagesRead(plan);
   const pctComplete = Math.min(100, Math.round((pagesRead / QURAN_TOTAL_PAGES) * 100));
   const isKhatmDone = !!plan.completedAt;
-  // Current streak: consecutive completed dates up to today
-  const sorted = [...plan.completedDates].sort();
+
+  // Total days with any reading logged
+  const allLoggedDates = new Set([
+    ...(plan.completedDates ?? []),
+    ...Object.keys(plan.dailyPages ?? {}),
+  ]);
+  const totalCompleted = allLoggedDates.size;
+
+  // Current streak: consecutive dates with reading up to today
+  const sorted = [...allLoggedDates].sort();
   let streak = 0;
   const todayStr = new Date().toISOString().slice(0, 10);
   let cursor = todayStr;
@@ -118,7 +142,12 @@ export function getPlanProgress(plan: QuranPlan) {
 function loadPlan(): QuranPlan | null {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw) return JSON.parse(raw) as QuranPlan;
+    if (raw) {
+      const p = JSON.parse(raw) as QuranPlan;
+      // Migrate old plans that have no dailyPages field
+      if (!p.dailyPages) p.dailyPages = {};
+      return p;
+    }
   } catch { /* ignore */ }
   return null;
 }
@@ -142,25 +171,40 @@ export function useQuranPlan() {
       totalDays,
       pagesPerDay: Math.ceil(QURAN_TOTAL_PAGES / totalDays),
       completedDates: [],
+      dailyPages: {},
     };
     savePlan(newPlan);
     setPlan(newPlan);
   }, []);
 
-  const markDone = useCallback((dateStr: string) => {
+  /** Log `pagesRead` for a given date. If omitted, uses the dynamic daily target. */
+  const markDone = useCallback((dateStr: string, pagesRead?: number) => {
     const current = loadPlan();
     if (!current) return;
-    if (current.completedDates.includes(dateStr)) return;
-    const newDates = [...current.completedDates, dateStr].sort();
-    const pagesRead = Math.min(newDates.length * current.pagesPerDay, QURAN_TOTAL_PAGES);
-    const isKhatm = pagesRead >= QURAN_TOTAL_PAGES || newDates.length >= current.totalDays;
+
+    // Calculate how many pages to log if not provided
+    const pages = pagesRead ?? getPagesForDate(current, dateStr);
+
+    const newDailyPages = { ...(current.dailyPages ?? {}), [dateStr]: pages };
+    // Also keep completedDates in sync for backward compat
+    const newDates = [...new Set([...(current.completedDates ?? []), dateStr])].sort();
+
+    const totalRead = Math.min(
+      QURAN_TOTAL_PAGES,
+      Object.values(newDailyPages).reduce((s, p) => s + p, 0) +
+        (current.completedDates ?? []).filter(d => !newDailyPages[d]).length * current.pagesPerDay,
+    );
+    const isKhatm = totalRead >= QURAN_TOTAL_PAGES || newDates.length >= current.totalDays;
+
     const updated: QuranPlan = {
       ...current,
       completedDates: newDates,
+      dailyPages: newDailyPages,
       completedAt: isKhatm && !current.completedAt ? dateStr : current.completedAt,
     };
     savePlan(updated);
     setPlan(updated);
+
     if (isKhatm && !current.completedAt) {
       window.dispatchEvent(new CustomEvent("quran-khatm-complete", { detail: { plan: updated } }));
     } else {
@@ -173,9 +217,12 @@ export function useQuranPlan() {
   const unmarkDone = useCallback((dateStr: string) => {
     const current = loadPlan();
     if (!current) return;
+    const newDailyPages = { ...(current.dailyPages ?? {}) };
+    delete newDailyPages[dateStr];
     const updated: QuranPlan = {
       ...current,
-      completedDates: current.completedDates.filter(d => d !== dateStr),
+      completedDates: (current.completedDates ?? []).filter(d => d !== dateStr),
+      dailyPages: newDailyPages,
       completedAt: undefined,
     };
     savePlan(updated);

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useParams, useLocation } from "wouter";
 import {
   ArrowLeft, Plus, Upload, Play, Trash2, RotateCcw, Wand2, Edit3, X, FolderPlus,
-  GripVertical, Search, FolderInput,
+  GripVertical, Search, FolderInput, Layers,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useAuthContext } from "@/lib/auth-context";
@@ -67,6 +67,7 @@ export default function FlashcardDeckPage() {
   const [deck, setDeck] = useState<Deck | null>(null);
   const [cards, setCards] = useState<Card[]>([]);
   const [subdecks, setSubdecks] = useState<Deck[]>([]);
+  const [allDecks, setAllDecks] = useState<Deck[]>([]);
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState<Card | null>(null);
   const [adding, setAdding] = useState(false);
@@ -75,6 +76,9 @@ export default function FlashcardDeckPage() {
   const [creatingSubdeck, setCreatingSubdeck] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [search, setSearch] = useState("");
+  const [searchAllSubdecks, setSearchAllSubdecks] = useState(false);
+  const [allSubdeckCards, setAllSubdeckCards] = useState<Card[]>([]);
+  const [loadingSubdeckCards, setLoadingSubdeckCards] = useState(false);
   const [dragOverId, setDragOverId] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
@@ -94,7 +98,9 @@ export default function FlashcardDeckPage() {
       .then(([d, c, all]) => {
         setDeck(d);
         setCards(c.cards);
-        setSubdecks(all.decks.filter(x => x.parentId === deckId));
+        const directSubs = all.decks.filter(x => x.parentId === deckId);
+        setSubdecks(directSubs);
+        setAllDecks(all.decks);
         // Auto-select the first card so the preview pane has something to show.
         if (c.cards.length > 0 && !selectedId) setSelectedId(c.cards[0]!.id);
       })
@@ -102,6 +108,16 @@ export default function FlashcardDeckPage() {
       .finally(() => setLoading(false));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user, deckId, toast]);
+
+  // Load all-subdeck cards when the toggle is turned on
+  useEffect(() => {
+    if (!user || !searchAllSubdecks) return;
+    setLoadingSubdeckCards(true);
+    jsonFetch<{ cards: Card[] }>(`/api/flashcards?deckId=${deckId}&includeSubdecks=1`)
+      .then(c => setAllSubdeckCards(c.cards))
+      .catch(() => toast({ title: "Could not load subdeck cards", variant: "destructive" }))
+      .finally(() => setLoadingSubdeckCards(false));
+  }, [user, deckId, searchAllSubdecks, toast]);
 
   async function createSubdeck() {
     if (!subdeckName.trim() || !deck) return;
@@ -233,14 +249,42 @@ export default function FlashcardDeckPage() {
     setType("cloze");
   }
 
+  // Build a map of deckId → deck name for all decks in the subtree
+  const deckNameMap = useMemo(
+    () => new Map(allDecks.map(d => [d.id, d.name])),
+    [allDecks],
+  );
+
+  // All decks that are part of this deck's subtree (for move-to select)
+  const subtreeDecks = useMemo(
+    () => allDecks.filter(d => d.id !== deckId && (
+      // Simple BFS-like: include anything that has deckId in its ancestor chain
+      // For now we use allDecks and mark those whose parentId is in the subtree
+      (() => {
+        let cur: string | null = d.id;
+        const visited = new Set<string>();
+        while (cur && !visited.has(cur)) {
+          visited.add(cur);
+          const parent = allDecks.find(x => x.id === cur)?.parentId ?? null;
+          if (parent === deckId) return true;
+          cur = parent;
+        }
+        return false;
+      })()
+    )),
+    [allDecks, deckId],
+  );
+
+  const activeCards = searchAllSubdecks ? allSubdeckCards : cards;
+
   const filteredCards = useMemo(() => {
-    if (!search.trim()) return cards;
+    if (!search.trim()) return activeCards;
     const q = search.toLowerCase();
-    return cards.filter(c =>
+    return activeCards.filter(c =>
       stripMarkdown(c.front).toLowerCase().includes(q) ||
       stripMarkdown(c.back).toLowerCase().includes(q),
     );
-  }, [cards, search]);
+  }, [activeCards, search]);
 
   const selectedCard = useMemo(
     () => filteredCards.find(c => c.id === selectedId) ?? null,
@@ -428,7 +472,7 @@ export default function FlashcardDeckPage() {
         </div>
       )}
 
-      {cards.length === 0 ? (
+      {cards.length === 0 && !searchAllSubdecks ? (
         <div className="p-12 text-center bg-card border rounded-xl">
           <p className="text-sm text-muted-foreground">No cards yet — add one or import a file.</p>
         </div>
@@ -436,27 +480,54 @@ export default function FlashcardDeckPage() {
         <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.4fr)] gap-4 items-start">
           {/* List */}
           <div className="bg-card border rounded-xl shadow-sm flex flex-col min-h-[320px] max-h-[calc(100vh-220px)]">
-            <div className="p-3 border-b border-border/60 flex items-center gap-2">
-              <Search className="w-3.5 h-3.5 text-muted-foreground" />
-              <input
-                value={search}
-                onChange={e => setSearch(e.target.value)}
-                placeholder="Search cards…"
-                className="flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
-                data-testid="input-search-cards"
-              />
-              {search && (
-                <button onClick={() => setSearch("")} className="p-1 rounded hover:bg-secondary">
-                  <X className="w-3 h-3" />
+            <div className="p-3 border-b border-border/60 space-y-2">
+              <div className="flex items-center gap-2">
+                <Search className="w-3.5 h-3.5 text-muted-foreground" />
+                <input
+                  value={search}
+                  onChange={e => setSearch(e.target.value)}
+                  placeholder={searchAllSubdecks ? "Search all subdecks…" : "Search cards…"}
+                  className="flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
+                  data-testid="input-search-cards"
+                />
+                {search && (
+                  <button onClick={() => setSearch("")} className="p-1 rounded hover:bg-secondary">
+                    <X className="w-3 h-3" />
+                  </button>
+                )}
+              </div>
+              {subdecks.length > 0 && (
+                <button
+                  onClick={() => {
+                    setSearchAllSubdecks(s => !s);
+                    setSelectedId(null);
+                    setSearch("");
+                  }}
+                  className={`w-full flex items-center gap-1.5 text-[11px] font-semibold px-2 py-1 rounded-md transition-colors ${
+                    searchAllSubdecks
+                      ? "bg-primary/10 text-primary"
+                      : "text-muted-foreground hover:bg-secondary"
+                  }`}
+                  title="Search cards across all subdecks and move them between subdecks"
+                >
+                  <Layers className="w-3 h-3" />
+                  {searchAllSubdecks
+                    ? `Searching all subdecks (${loadingSubdeckCards ? "…" : allSubdeckCards.length} cards)`
+                    : "Search across all subdecks"}
                 </button>
               )}
             </div>
             <div className="overflow-y-auto flex-1 divide-y divide-border/60">
               {filteredCards.length === 0 ? (
-                <p className="text-xs text-muted-foreground text-center p-4">No matches.</p>
+                <p className="text-xs text-muted-foreground text-center p-4">
+                  {loadingSubdeckCards ? "Loading…" : "No matches."}
+                </p>
               ) : filteredCards.map(c => {
                 const isSelected = c.id === selectedId;
                 const oneLine = stripMarkdown(c.type === "cloze" ? renderCloze(c.front).hidden : c.front);
+                const cardDeckName = searchAllSubdecks && c.deckId !== deckId
+                  ? deckNameMap.get(c.deckId)
+                  : null;
                 return (
                   <button
                     key={c.id}
@@ -474,7 +545,7 @@ export default function FlashcardDeckPage() {
                   >
                     <GripVertical className="w-3.5 h-3.5 text-muted-foreground/50 mt-1 shrink-0 cursor-grab active:cursor-grabbing" />
                     <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-1.5 mb-0.5">
+                      <div className="flex items-center gap-1.5 mb-0.5 flex-wrap">
                         <span className={`text-[9px] uppercase font-bold tracking-wider px-1.5 py-0.5 rounded ${
                           c.type === "cloze"
                             ? "bg-amber-500/15 text-amber-600 dark:text-amber-300"
@@ -482,6 +553,11 @@ export default function FlashcardDeckPage() {
                         }`}>
                           {c.type}
                         </span>
+                        {cardDeckName && (
+                          <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded bg-violet-500/10 text-violet-600 dark:text-violet-300 truncate max-w-[120px]">
+                            {cardDeckName}
+                          </span>
+                        )}
                         <span className="text-[10px] text-muted-foreground truncate">
                           {c.reps}r · {c.lapses}l · ease {c.ease.toFixed(2)}
                         </span>
@@ -502,8 +578,8 @@ export default function FlashcardDeckPage() {
             {selectedCard ? (
               <CardPreview
                 card={selectedCard}
-                deckName={deck.name}
-                subdecks={subdecks}
+                deckName={deckNameMap.get(selectedCard.deckId) ?? deck.name}
+                subdecks={searchAllSubdecks ? subtreeDecks : subdecks}
                 onEdit={() => startEdit(selectedCard)}
                 onDelete={() => deleteCard(selectedCard.id)}
                 onMove={(targetId) => moveCardToDeck(selectedCard.id, targetId)}

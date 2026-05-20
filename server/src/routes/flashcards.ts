@@ -293,8 +293,20 @@ router.get("/flashcards", async (req, res) => {
   const userId = requireAuth(req, res);
   if (!userId) return;
   const deckId = req.query["deckId"] ? String(req.query["deckId"]) : null;
-  const where = deckId
-    ? and(eq(flashcardsTable.userId, userId), eq(flashcardsTable.deckId, deckId))
+  const includeSubdecks = req.query["includeSubdecks"] === "1" || req.query["includeSubdecks"] === "true";
+
+  let deckIds: string[] | null = null;
+  if (deckId) {
+    if (includeSubdecks) {
+      deckIds = await expandDeckSubtree(userId, deckId);
+      if (deckIds.length === 0) { res.json({ cards: [] }); return; }
+    } else {
+      deckIds = [deckId];
+    }
+  }
+
+  const where = deckIds
+    ? and(eq(flashcardsTable.userId, userId), inArray(flashcardsTable.deckId, deckIds))
     : eq(flashcardsTable.userId, userId);
   const rows = await db
     .select()
@@ -392,40 +404,58 @@ const ReviewBody = z.object({
 });
 
 /**
- * SM-2 (Anki classic).
- *  rating 1 (Again): reset reps, interval = 0 (re-show in ~1 min on client),
- *                    ease drops by 0.20, lapses++
- *  rating 2 (Hard):  interval *= 1.2, ease drops by 0.15
- *  rating 3 (Good):  if reps==0 → 1d, reps==1 → 6d, else interval *= ease
- *  rating 4 (Easy):  bigger jump; interval *= ease * 1.3, ease += 0.15
- *  Ease floor 1.3, ceiling 3.5.
+ * Improved SM-2+ scheduler.
+ *
+ * Key improvements over vanilla SM-2:
+ *  - Learning steps: Again→10 min, Hard→1 day (caps re-show bleeding)
+ *  - Good on first rep → 1d, second → 4d, then ease-driven
+ *  - Easy on first rep → 4d, second → 10d, then ease*1.3
+ *  - Interval fuzz (±5 %) prevents card "bunching" on the same future day
+ *  - Ease floor 1.3, ceiling 3.5; fine-grained adjustments per rating
+ *  - Lapse penalty scales with lapses (leech protection)
+ *
+ * Schema fields are identical — no migration required.
  */
 function nextSchedule(card: typeof flashcardsTable.$inferSelect, rating: 1 | 2 | 3 | 4) {
   let interval = card.interval;
-  let ease = card.ease || 2.5;
+  let ease = Math.min(3.5, Math.max(1.3, card.ease || 2.5));
   let reps = card.reps;
   let lapses = card.lapses;
 
   if (rating === 1) {
+    // Again: reset to learning, extra ease penalty scales with lapse count
     reps = 0;
-    interval = 0; // due immediately, but we offset 10 min below
-    ease = Math.max(1.3, ease - 0.2);
+    interval = 0;
+    const lapsePenalty = Math.min(0.4, 0.2 + lapses * 0.01);
+    ease = Math.max(1.3, ease - lapsePenalty);
     lapses += 1;
   } else if (rating === 2) {
-    interval = Math.max(1, interval * 1.2);
+    // Hard: small interval bump, ease drop
+    if (reps === 0) interval = 1;
+    else interval = Math.max(1, interval * 1.2);
     ease = Math.max(1.3, ease - 0.15);
     reps += 1;
   } else if (rating === 3) {
+    // Good: standard SM-2 steps
     if (reps === 0) interval = 1;
-    else if (reps === 1) interval = 6;
+    else if (reps === 1) interval = 4;
     else interval = interval * ease;
+    // Ease is unchanged on Good (unlike vanilla SM-2 which drifts down)
     reps += 1;
   } else {
+    // Easy: bigger jump, ease bonus
     if (reps === 0) interval = 4;
-    else if (reps === 1) interval = 8;
+    else if (reps === 1) interval = 10;
     else interval = interval * ease * 1.3;
     ease = Math.min(3.5, ease + 0.15);
     reps += 1;
+  }
+
+  // Apply ±5 % fuzz to spread cards across adjacent days (avoid bunching).
+  // Only applies to intervals longer than 2 days.
+  if (interval > 2) {
+    const fuzz = 1 + (Math.random() * 0.1 - 0.05);
+    interval = Math.max(1, interval * fuzz);
   }
 
   const dueAt = new Date();
