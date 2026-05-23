@@ -5,7 +5,7 @@ import {
   flashcardsTable,
   flashcardReviewsTable,
 } from "../db";
-import { and, desc, eq, gte, inArray, lte, sql } from "drizzle-orm";
+import { and, desc, eq, gte, ilike, inArray, lte, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import multer from "multer";
 import { parseApkg, type ParsedCard as ApkgCard } from "../anki";
@@ -314,6 +314,49 @@ router.get("/flashcards", async (req, res) => {
     .where(where)
     .orderBy(desc(flashcardsTable.createdAt));
   res.json({ cards: rows.map(serializeCard) });
+});
+
+router.get("/flashcards/search", async (req, res) => {
+  const userId = requireAuth(req, res);
+  if (!userId) return;
+  const q = String(req.query["q"] ?? "").trim();
+  if (q.length < 2) { res.json({ results: [] }); return; }
+
+  const allDecks = await db
+    .select({ id: flashcardDecksTable.id, name: flashcardDecksTable.name, parentId: flashcardDecksTable.parentId })
+    .from(flashcardDecksTable)
+    .where(eq(flashcardDecksTable.userId, userId));
+
+  const deckMap = new Map(allDecks.map(d => [d.id, d]));
+
+  function getDeckPath(deckId: string): string[] {
+    const path: string[] = [];
+    let current = deckMap.get(deckId);
+    let guard = 0;
+    while (current && guard++ < 20) {
+      path.unshift(current.name);
+      current = current.parentId ? deckMap.get(current.parentId) : undefined;
+    }
+    return path;
+  }
+
+  const term = `%${q}%`;
+  const cards = await db
+    .select()
+    .from(flashcardsTable)
+    .where(and(
+      eq(flashcardsTable.userId, userId),
+      or(ilike(flashcardsTable.front, term), ilike(flashcardsTable.back, term)),
+    ))
+    .limit(50)
+    .orderBy(desc(flashcardsTable.updatedAt));
+
+  const results = cards.map(c => ({
+    ...serializeCard(c),
+    breadcrumb: getDeckPath(c.deckId),
+  }));
+
+  res.json({ results });
 });
 
 router.post("/flashcards", async (req, res) => {

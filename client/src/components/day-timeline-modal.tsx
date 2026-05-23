@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { format, parseISO } from "date-fns";
 import { X, Plus, Trash2, Check, Clock, GripVertical, CalendarDays } from "lucide-react";
+import { getPrayerTimes } from "@/lib/prayer-times";
 import {
   useTodos,
   addTodoLocal,
@@ -204,6 +205,15 @@ export function DayTimelineModal({ date, onClose, anchorRect }: DayTimelineModal
     }
     return out;
   }, [eventsForDay]);
+
+  const prayersByHour = useMemo(() => {
+    if (!date) return {} as Record<number, { name: string; time: string }[]>;
+    const out: Record<number, { name: string; time: string }[]> = {};
+    for (const p of getPrayerTimes(date)) {
+      (out[p.hour] = out[p.hour] ?? []).push({ name: p.name, time: p.time });
+    }
+    return out;
+  }, [date]);
 
   if (!date) return null;
 
@@ -679,9 +689,10 @@ export function DayTimelineModal({ date, onClose, anchorRect }: DayTimelineModal
         {HOURS.map(h => {
           const tasks = groupedByHour.byHour[h] ?? [];
           const events = eventsByHour[h] ?? [];
+          const prayers = prayersByHour[h] ?? [];
           const label = `${pad(h)}:00`;
           const isDropOver = dragOverHour === h;
-          const hasContent = tasks.length > 0 || events.length > 0
+          const hasContent = tasks.length > 0 || events.length > 0 || prayers.length > 0
             || (editingId === DRAFT_ID && draftHour === h)
             || (editingEventId === EVENT_DRAFT_ID && eventDraftHour === h)
             || (editingEventId !== null && editingEventId !== EVENT_DRAFT_ID && eventsByHour[h]?.some(e => e.id === editingEventId));
@@ -727,6 +738,17 @@ export function DayTimelineModal({ date, onClose, anchorRect }: DayTimelineModal
                   )
                 ) : (
                   <div className="space-y-1.5">
+                    {prayers.map(p => (
+                      <div
+                        key={p.name}
+                        className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg bg-emerald-500/10 border border-emerald-500/20 select-none"
+                        title={`${p.name} · ${p.time} (approximate UK time)`}
+                      >
+                        <span className="text-base leading-none" aria-hidden>🕌</span>
+                        <span className="text-xs font-semibold text-emerald-700 dark:text-emerald-400">{p.name}</span>
+                        <span className="text-[11px] text-emerald-600/80 dark:text-emerald-500/80 tabular-nums ml-auto">{p.time}</span>
+                      </div>
+                    ))}
                     {events.map(renderEventRow)}
                     {tasks.map(renderTodoRow)}
                     {editingId === DRAFT_ID && draftHour === h && renderTaskEditRow(DRAFT_ID, "timeline-edit-draft")}

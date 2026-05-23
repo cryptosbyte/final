@@ -1,10 +1,19 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "wouter";
 import {
-  Layers, Plus, Lock, Sparkles, Trash2, Pencil, Search, ChevronRight, ChevronDown, PenLine,
+  Layers, Plus, Lock, Sparkles, Trash2, Pencil, Search, ChevronRight, ChevronDown, PenLine, BookOpen, X,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useAuthContext } from "@/lib/auth-context";
+
+interface CardSearchResult {
+  id: string;
+  deckId: string;
+  type: string;
+  front: string;
+  back: string;
+  breadcrumb: string[];
+}
 
 interface Deck {
   id: string;
@@ -99,6 +108,9 @@ export default function FlashcardsPage() {
   const [filter, setFilter] = useState<string>("all");
   const [search, setSearch] = useState("");
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  const [cardResults, setCardResults] = useState<CardSearchResult[]>([]);
+  const [cardSearchLoading, setCardSearchLoading] = useState(false);
+  const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [fillBlanksMode, setFillBlanksMode] = useState<boolean>(() => {
     try { return localStorage.getItem("revision_tracker_fill_blanks_mode") === "1"; } catch { return false; }
   });
@@ -125,6 +137,19 @@ export default function FlashcardsPage() {
       .catch(() => toast({ title: "Could not load decks", variant: "destructive" }))
       .finally(() => setLoading(false));
   }, [user, toast]);
+
+  useEffect(() => {
+    if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
+    if (search.length < 2) { setCardResults([]); setCardSearchLoading(false); return; }
+    setCardSearchLoading(true);
+    searchTimerRef.current = setTimeout(() => {
+      jsonFetch<{ results: CardSearchResult[] }>(`/api/flashcards/search?q=${encodeURIComponent(search)}`)
+        .then(j => setCardResults(j.results))
+        .catch(() => setCardResults([]))
+        .finally(() => setCardSearchLoading(false));
+    }, 300);
+    return () => { if (searchTimerRef.current) clearTimeout(searchTimerRef.current); };
+  }, [search]);
 
   async function createDeck() {
     if (!name.trim()) return;
@@ -339,11 +364,68 @@ export default function FlashcardsPage() {
           <input
             value={search}
             onChange={e => setSearch(e.target.value)}
-            placeholder="Search decks…"
-            className="w-full pl-9 pr-3 py-2 rounded-full border border-border bg-background text-sm"
+            placeholder="Search decks & cards…"
+            className="w-full pl-9 pr-8 py-2 rounded-full border border-border bg-background text-sm"
           />
+          {search && (
+            <button
+              onClick={() => { setSearch(""); setCardResults([]); }}
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          )}
         </div>
       </div>
+
+      {/* Card search results */}
+      {search.length >= 2 && (
+        <div className="bg-card border rounded-xl shadow-sm overflow-hidden">
+          <div className="flex items-center justify-between px-4 py-2.5 border-b bg-secondary/30">
+            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+              {cardSearchLoading ? "Searching…" : `${cardResults.length} card${cardResults.length !== 1 ? "s" : ""} found`}
+            </p>
+            <p className="text-[11px] text-muted-foreground">Click to open deck</p>
+          </div>
+          {cardResults.length === 0 && !cardSearchLoading ? (
+            <div className="px-4 py-6 text-center">
+              <BookOpen className="w-7 h-7 mx-auto mb-2 text-muted-foreground/50" />
+              <p className="text-sm text-muted-foreground">No cards match "{search}"</p>
+            </div>
+          ) : (
+            <div className="divide-y divide-border/50 max-h-[420px] overflow-y-auto">
+              {cardResults.map(card => (
+                <Link
+                  key={card.id}
+                  href={`/flashcards/${card.deckId}`}
+                  className="flex items-start gap-3 px-4 py-3 hover:bg-secondary/40 transition-colors block"
+                >
+                  <div className="shrink-0 mt-0.5">
+                    <BookOpen className="w-3.5 h-3.5 text-muted-foreground" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-1 flex-wrap mb-0.5">
+                      {card.breadcrumb.map((crumb, i) => (
+                        <span key={i} className="flex items-center gap-1 text-[10px] text-muted-foreground font-medium">
+                          {i > 0 && <ChevronRight className="w-2.5 h-2.5" />}
+                          {crumb}
+                        </span>
+                      ))}
+                    </div>
+                    <p className="text-sm text-foreground line-clamp-1 font-medium">{card.front}</p>
+                    {card.back && (
+                      <p className="text-[11px] text-muted-foreground line-clamp-1 mt-0.5">{card.back}</p>
+                    )}
+                  </div>
+                  <span className="shrink-0 text-[10px] px-1.5 py-0.5 rounded-full bg-secondary text-muted-foreground font-medium mt-0.5">
+                    {card.type}
+                  </span>
+                </Link>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       {loading ? (
         <div className="p-8 text-center text-muted-foreground">Loading decks…</div>
