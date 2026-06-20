@@ -9,6 +9,7 @@ import bookmarksRouter from "./bookmarks";
 import notebooksRouter from "./notebooks";
 import flashcardsRouter from "./flashcards";
 import syncRouter from "./sync";
+import emailRouter from "./email";
 
 const router: IRouter = Router();
 
@@ -22,5 +23,6 @@ router.use(bookmarksRouter);
 router.use(notebooksRouter);
 router.use(flashcardsRouter);
 router.use(syncRouter);
+router.use(emailRouter);
 
 export default router;

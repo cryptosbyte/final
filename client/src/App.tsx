@@ -14,6 +14,7 @@ import NotebookPublicPage from "@/pages/notebook-public";
 import FlashcardsPage from "@/pages/flashcards";
 import FlashcardDeckPage from "@/pages/flashcard-deck";
 import FlashcardStudyPage from "@/pages/flashcard-study";
+import EmailPage from "@/pages/email";
 import { AuthProvider } from "@/lib/auth-context";
 
 const queryClient = new QueryClient();
@@ -34,6 +35,7 @@ function Router() {
         <Route path="/flashcards" component={FlashcardsPage} />
         <Route path="/flashcards/:id" component={FlashcardDeckPage} />
         <Route path="/flashcards/:id/study" component={FlashcardStudyPage} />
+        <Route path="/email" component={EmailPage} />
         <Route component={NotFound} />
       </Switch>
     </Layout>

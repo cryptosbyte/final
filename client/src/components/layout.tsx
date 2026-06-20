@@ -3,9 +3,10 @@ import { Link, useLocation } from "wouter";
 import { useIsMobile } from "@/hooks/use-mobile";
 import {
   CalendarDays, BarChart2, LogIn, LogOut, User, Images,
-  Sparkles, Sun, Moon, Bookmark, BookOpen, Layers,
+  Sparkles, Sun, Moon, Bookmark, BookOpen, Layers, Mail,
 } from "lucide-react";
 import { useAuthContext } from "@/lib/auth-context";
+import { isOwner } from "@/lib/owner";
 import { useTodoSync } from "@/hooks/use-todo-sync";
 import { useBookmarksSync } from "@/hooks/use-bookmarks-sync";
 import { useDeviceSync } from "@/hooks/use-device-sync";
@@ -71,6 +72,9 @@ export function Layout({ children }: LayoutProps) {
     { href: "/bookmarks", label: "Bookmarks", icon: Bookmark,    match: (l: string) => l === "/bookmarks", testId: "link-bookmarks" },
     { href: "/resources", label: "Resources", icon: BookOpen,    match: (l: string) => l.startsWith("/resources"), testId: "link-resources" },
     { href: "/flashcards", label: "Flashcards", icon: Layers,     match: (l: string) => l.startsWith("/flashcards"), testId: "link-flashcards" },
+    ...(isOwner(user?.id)
+      ? [{ href: "/email", label: "Email", icon: Mail, match: (l: string) => l.startsWith("/email"), testId: "link-email" }]
+      : []),
   ];
 
   return (

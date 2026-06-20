@@ -6,3 +6,4 @@ export * from "./bookmarks";
 export * from "./notebooks";
 export * from "./flashcards";
 export * from "./sync";
+export * from "./gmail";
