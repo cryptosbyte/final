@@ -1,0 +1,86 @@
+Failed to read Gmail token status: _DrizzleQueryError: Failed query: select "user_id", "email", "access_token", "refresh_token", "expiry_date", "scope", "updated_at" from "gmail_tokens" where "gmail_tokens"."user_id" = $1 limit $2
+params: github:74561974,1
+    at NodePgPreparedQuery.queryWithCache (file:///app/dist/server/index.mjs:61924:15)
+    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+    at async file:///app/dist/server/index.mjs:62157:22
+    at async getStoredTokens (file:///app/dist/server/index.mjs:80029:17)
+    at async file:///app/dist/server/index.mjs:80226:11 {
+  query: 'select "user_id", "email", "access_token", "refresh_token", "expiry_date", "scope", "updated_at" from "gmail_tokens" where "gmail_tokens"."user_id" = $1 limit $2',
+  params: [ 'github:74561974', 1 ],
+  cause: error: relation "gmail_tokens" does not exist
+      at file:///app/dist/server/index.mjs:32943:15
+      at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+      at async file:///app/dist/server/index.mjs:62164:18
+      at async NodePgPreparedQuery.queryWithCache (file:///app/dist/server/index.mjs:61922:16)
+      at async file:///app/dist/server/index.mjs:62157:22
+      at async getStoredTokens (file:///app/dist/server/index.mjs:80029:17)
+      at async file:///app/dist/server/index.mjs:80226:11 {
+    detail: undefined,
+request completed
+    hint: undefined,
+    constraint: undefined,
+    position: '103',
+    internalPosition: undefined,
+    file: 'parse_relation.c',
+    internalQuery: undefined,
+    line: '1449',
+    length: 112,
+    where: undefined,
+    severity: 'ERROR',
+    routine: 'parserOpenTable'
+    schema: undefined,
+    code: '42P01',
+  }
+    table: undefined,
+    column: undefined,
+}
+    dataType: undefined,
+request completed
+request completed
+request completed
+request errored
+request errored
+request completed
+request completed
+request completed
+request completed
+request completed
+request completed
+request completed
+request completed
+Failed to read Gmail token status: _DrizzleQueryError: Failed query: select "user_id", "email", "access_token", "refresh_token", "expiry_date", "scope", "updated_at" from "gmail_tokens" where "gmail_tokens"."user_id" = $1 limit $2
+params: github:74561974,1
+      at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+      at async file:///app/dist/server/index.mjs:62164:18
+    at NodePgPreparedQuery.queryWithCache (file:///app/dist/server/index.mjs:61924:15)
+      at async NodePgPreparedQuery.queryWithCache (file:///app/dist/server/index.mjs:61922:16)
+    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+      at async file:///app/dist/server/index.mjs:62157:22
+    at async file:///app/dist/server/index.mjs:62157:22
+      at async getStoredTokens (file:///app/dist/server/index.mjs:80029:17)
+      at async file:///app/dist/server/index.mjs:80226:11 {
+    at async getStoredTokens (file:///app/dist/server/index.mjs:80029:17)
+    length: 112,
+    at async file:///app/dist/server/index.mjs:80226:11 {
+    severity: 'ERROR',
+  query: 'select "user_id", "email", "access_token", "refresh_token", "expiry_date", "scope", "updated_at" from "gmail_tokens" where "gmail_tokens"."user_id" = $1 limit $2',
+    code: '42P01',
+  params: [ 'github:74561974', 1 ],
+    detail: undefined,
+  cause: error: relation "gmail_tokens" does not exist
+      at file:///app/dist/server/index.mjs:32943:15
+    hint: undefined,
+    position: '103',
+    internalPosition: undefined,
+    internalQuery: undefined,
+    where: undefined,
+    schema: undefined,
+    table: undefined,
+    column: undefined,
+    dataType: undefined,
+    constraint: undefined,
+    file: 'parse_relation.c',
+    line: '1449',
+    routine: 'parserOpenTable'
+  }
+}

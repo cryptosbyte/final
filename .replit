@@ -83,4 +83,4 @@ channel = "stable-25_05"
 
 [userenv.shared]
 GOOGLE_CLIENT_ID = "299057513081-h45cc8jlqv6jhj2t39458j8s7nffqi41.apps.googleusercontent.com"
-GOOGLE_OAUTH_REDIRECT = "https://zakir.today/email"
+GOOGLE_OAUTH_REDIRECT = "https://zakir.up.railway.app/email"
