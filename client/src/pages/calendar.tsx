@@ -19,6 +19,7 @@ import { DayEntryModal } from "@/components/day-entry-modal";
 import { DayTimelineModal, RT_TODO_DRAG_TYPE } from "@/components/day-timeline-modal";
 import { Subject } from "@/hooks/use-revision-data";
 import { getExamsOnDate } from "@/lib/exam-dates";
+import { estimateDayHours, formatHours } from "@/lib/activity-hours";
 import { useAuthContext } from "@/lib/auth-context";
 import { useToast } from "@/hooks/use-toast";
 import { useTodoCountsByDeadline, useTodos, updateTodoLocal } from "@/hooks/use-todos";
@@ -276,6 +277,15 @@ export default function CalendarPage() {
                 const examsOnDay = getExamsOnDate(dateStr);
                 const eventsOnDay = allEvents.filter(ev => ev.date === dateStr);
 
+                // Estimated study hours — shown only for the exam-season months
+                // (Apr/May/Jun 2026) and only when work was actually logged.
+                const inRecapMonth = day.getFullYear() === 2026 && [3, 4, 5].includes(day.getMonth());
+                const estHours = inRecapMonth ? estimateDayHours(entry) : 0;
+                // Round before deciding visibility so a tiny positive total never
+                // renders as a "0h" badge (requirement: never show 0h).
+                const roundedHours = Math.round(estHours * 2) / 2;
+                const showHoursBadge = inRecapMonth && roundedHours > 0;
+
                 const SUBJECT_VAR: Record<string, string> = {
                   biology:   "--biology",
                   chemistry: "--chemistry",
@@ -342,19 +352,34 @@ export default function CalendarPage() {
                       >
                         {format(day, "d")}
                       </span>
-                      {isCurrentMonth && day >= todayStart && todoCountsByDate[dateStr] > 0 && (
-                        <span
-                          className="px-1.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wide whitespace-nowrap leading-none"
-                          style={{
-                            background: "hsl(var(--apple-orange))",
-                            color: "rgba(0,0,0,0.85)",
-                          }}
-                          title={`${todoCountsByDate[dateStr]} task${todoCountsByDate[dateStr] !== 1 ? "s" : ""} due`}
-                          data-testid={`badge-tasks-due-${dateStr}`}
-                        >
-                          {todoCountsByDate[dateStr]} {todoCountsByDate[dateStr] === 1 ? "Task" : "Tasks"}
-                        </span>
-                      )}
+                      <div className="flex items-center gap-1 shrink-0">
+                        {isCurrentMonth && day >= todayStart && todoCountsByDate[dateStr] > 0 && (
+                          <span
+                            className="px-1.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wide whitespace-nowrap leading-none"
+                            style={{
+                              background: "hsl(var(--apple-orange))",
+                              color: "rgba(0,0,0,0.85)",
+                            }}
+                            title={`${todoCountsByDate[dateStr]} task${todoCountsByDate[dateStr] !== 1 ? "s" : ""} due`}
+                            data-testid={`badge-tasks-due-${dateStr}`}
+                          >
+                            {todoCountsByDate[dateStr]} {todoCountsByDate[dateStr] === 1 ? "Task" : "Tasks"}
+                          </span>
+                        )}
+                        {showHoursBadge && (
+                          <span
+                            className="px-1.5 py-0.5 rounded-full text-[10px] font-bold whitespace-nowrap leading-none"
+                            style={{
+                              background: "hsl(var(--primary) / 0.14)",
+                              color: "hsl(var(--primary))",
+                            }}
+                            title={`~${formatHours(roundedHours)} of work estimated from what you logged`}
+                            data-testid={`badge-hours-${dateStr}`}
+                          >
+                            {formatHours(roundedHours)}
+                          </span>
+                        )}
+                      </div>
                     </div>
 
                     {/* Indicators */}

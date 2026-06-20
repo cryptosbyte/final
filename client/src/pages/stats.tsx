@@ -22,6 +22,9 @@ import {
 import { useRevisionData, Subject, ExamPaperRecord, SubjectEntry, DayEntry } from "@/hooks/use-revision-data";
 import { useAuthContext } from "@/lib/auth-context";
 import { FlashcardsStatsSection } from "@/components/flashcards-stats-section";
+import { ExamRecap } from "@/components/exam-recap";
+import { Sparkles, Play } from "lucide-react";
+import { motion } from "framer-motion";
 import { useQuranPlan, getPlanProgress, getPagesForDate, getPageRangeForDate, getSurahsForPageRange, QURAN_TOTAL_PAGES } from "@/hooks/use-quran-plan";
 import { QuranSetupModal } from "@/components/quran-setup-modal";
 
@@ -1537,6 +1540,7 @@ export default function StatsPage() {
     }
     return new Date(2026, 3, 1);
   });
+  const [recapOpen, setRecapOpen] = useState(false);
 
   const monthData = useMemo(() => {
     const start = startOfMonth(selectedMonth);
@@ -1640,6 +1644,41 @@ export default function StatsPage() {
 
   return (
     <div className="flex-1 overflow-auto bg-background p-6 md:p-10 space-y-10">
+      <motion.button
+        type="button"
+        onClick={() => setRecapOpen(true)}
+        initial={{ opacity: 0, y: 12 }}
+        animate={{ opacity: 1, y: 0 }}
+        whileHover={{ scale: 1.01 }}
+        whileTap={{ scale: 0.99 }}
+        className="relative w-full max-w-6xl mx-auto flex items-center gap-4 overflow-hidden rounded-2xl px-6 py-5 text-left shadow-lg"
+        style={{
+          background:
+            "linear-gradient(110deg, #4c1d95 0%, #7c3aed 45%, #db2777 100%)",
+        }}
+        data-testid="button-open-recap"
+      >
+        <div className="shrink-0 grid place-items-center w-12 h-12 rounded-full bg-white/15">
+          <Sparkles className="w-6 h-6 text-white" />
+        </div>
+        <div className="flex-1 min-w-0">
+          <p className="text-[11px] font-bold uppercase tracking-[0.25em] text-white/70">
+            Exam Season Wrapped
+          </p>
+          <h2 className="text-xl md:text-2xl font-black text-white leading-tight">
+            Your April–June revision recap is ready
+          </h2>
+          <p className="text-sm text-white/75 mt-0.5">
+            An animated story of how the season went. Tap to play.
+          </p>
+        </div>
+        <div className="shrink-0 grid place-items-center w-12 h-12 rounded-full bg-white text-purple-700 shadow-md">
+          <Play className="w-5 h-5 ml-0.5 fill-current" />
+        </div>
+      </motion.button>
+
+      <ExamRecap data={data} open={recapOpen} onClose={() => setRecapOpen(false)} />
+
       <ExamCountdown />
 
       <StreakCard data={data} />

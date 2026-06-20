@@ -1,1 +1,2 @@
-- [Owner-only Gmail email feature](email-feature.md) — zakir.today owner email tab: Gmail OAuth is prod-only, no API-key shortcut, Brevo HTTP API, app runs from repo root on port 5000.
+- [Hosting & prod DB](hosting.md) — app is on Railway, NOT Replit deploys; prod migrations go through Railway, never `suggest_deploy`.
+- [TS DOM-lib noise](tsconfig-dom-noise.md) — root tsconfig lacks DOM lib; window/DOMRect/DataTransfer/KeyboardEvent.key errors are expected noise, not real bugs.
