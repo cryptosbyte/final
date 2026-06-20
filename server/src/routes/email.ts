@@ -57,7 +57,15 @@ function handleGmailError(err: unknown, res: Response) {
 router.use("/email", ownerOnly);
 
 router.get("/email/status", async (req: Request, res: Response) => {
-  const row = await getStoredTokens(req.user!.id);
+  let row: Awaited<ReturnType<typeof getStoredTokens>> | null = null;
+  try {
+    row = await getStoredTokens(req.user!.id);
+  } catch (err) {
+    // If the token store is unavailable (e.g. table not yet migrated to this
+    // environment), treat it as "not connected" so the UI shows the connect
+    // flow instead of a hard 500.
+    console.error("Failed to read Gmail token status:", err);
+  }
   res.set("Cache-Control", "no-store");
   res.json({
     connected: !!row?.refreshToken,
