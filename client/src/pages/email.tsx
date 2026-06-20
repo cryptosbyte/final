@@ -8,6 +8,8 @@ import {
   Loader2,
   Inbox,
   LinkIcon,
+  PenSquare,
+  X,
 } from "lucide-react";
 import { useAuthContext } from "@/lib/auth-context";
 import { isOwner } from "@/lib/owner";
@@ -91,8 +93,17 @@ export default function EmailPage() {
   const [replyOpen, setReplyOpen] = useState(false);
   const [replyBody, setReplyBody] = useState("");
   const [sending, setSending] = useState(false);
+  const [composeOpen, setComposeOpen] = useState(false);
+  const [composeTo, setComposeTo] = useState("");
+  const [composeSubject, setComposeSubject] = useState("");
+  const [composeBody, setComposeBody] = useState("");
+  const [composeSending, setComposeSending] = useState(false);
 
   const owner = isOwner(user?.id);
+
+  const composeToValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(composeTo.trim());
+  const composeValid =
+    composeToValid && !!composeSubject.trim() && !!composeBody.trim();
 
   const loadMessages = useCallback(async () => {
     setLoadingMessages(true);
@@ -227,6 +238,46 @@ export default function EmailPage() {
     }
   };
 
+  const openCompose = () => {
+    setComposeTo("");
+    setComposeSubject("");
+    setComposeBody("");
+    setComposeOpen(true);
+  };
+
+  const closeCompose = () => {
+    if (composeSending) return;
+    setComposeOpen(false);
+  };
+
+  const sendCompose = async () => {
+    if (!composeValid) return;
+    setComposeSending(true);
+    try {
+      await jsonFetch("/api/email/send", {
+        method: "POST",
+        body: JSON.stringify({
+          to: composeTo.trim(),
+          subject: composeSubject.trim(),
+          text: composeBody,
+        }),
+      });
+      toast({ title: "Email sent" });
+      setComposeOpen(false);
+      setComposeTo("");
+      setComposeSubject("");
+      setComposeBody("");
+    } catch (err) {
+      toast({
+        title: "Couldn't send email",
+        description: (err as Error).message,
+        variant: "destructive",
+      });
+    } finally {
+      setComposeSending(false);
+    }
+  };
+
   if (isLoading) {
     return (
       <div className="flex-1 grid place-items-center">
@@ -252,14 +303,23 @@ export default function EmailPage() {
           </div>
         </div>
         {status?.connected && (
-          <button
-            onClick={loadMessages}
-            disabled={loadingMessages}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold bg-secondary hover:bg-secondary/70 transition-colors disabled:opacity-50"
-          >
-            <RefreshCw className={`w-3.5 h-3.5 ${loadingMessages ? "animate-spin" : ""}`} />
-            Refresh
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={openCompose}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold bg-primary text-primary-foreground hover:opacity-90 transition-opacity"
+            >
+              <PenSquare className="w-3.5 h-3.5" />
+              Compose
+            </button>
+            <button
+              onClick={loadMessages}
+              disabled={loadingMessages}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold bg-secondary hover:bg-secondary/70 transition-colors disabled:opacity-50"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${loadingMessages ? "animate-spin" : ""}`} />
+              Refresh
+            </button>
+          </div>
         )}
       </div>
 
@@ -447,6 +507,85 @@ export default function EmailPage() {
                 </div>
               </>
             )}
+          </div>
+        </div>
+      )}
+
+      {composeOpen && (
+        <div
+          className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm grid place-items-center p-4"
+          onClick={closeCompose}
+        >
+          <div
+            className="w-full max-w-lg rounded-2xl border border-border bg-card shadow-xl flex flex-col max-h-[90vh]"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between px-5 py-3.5 border-b border-border/60">
+              <h2 className="font-semibold text-sm flex items-center gap-2">
+                <PenSquare className="w-4 h-4" /> New email
+              </h2>
+              <button
+                onClick={closeCompose}
+                disabled={composeSending}
+                className="w-7 h-7 grid place-items-center rounded-full hover:bg-secondary transition-colors disabled:opacity-50"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="flex flex-col gap-3 px-5 py-4 overflow-y-auto">
+              <div className="text-xs text-muted-foreground">
+                From {contactAddress}
+              </div>
+              <input
+                type="email"
+                autoFocus
+                value={composeTo}
+                onChange={(e) => setComposeTo(e.target.value)}
+                placeholder="To (email address)"
+                className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40"
+              />
+              <input
+                value={composeSubject}
+                onChange={(e) => setComposeSubject(e.target.value)}
+                placeholder="Subject"
+                className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40"
+              />
+              <textarea
+                value={composeBody}
+                onChange={(e) => setComposeBody(e.target.value)}
+                rows={8}
+                placeholder="Write your message…"
+                className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm resize-y focus:outline-none focus:ring-2 focus:ring-primary/40"
+              />
+            </div>
+
+            <div className="flex items-center gap-2 px-5 py-3.5 border-t border-border/60">
+              <button
+                onClick={sendCompose}
+                disabled={composeSending || !composeValid}
+                className="flex items-center gap-2 px-4 py-2 rounded-full text-sm font-semibold bg-primary text-primary-foreground hover:opacity-90 transition-opacity disabled:opacity-50"
+              >
+                {composeSending ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  <Send className="w-4 h-4" />
+                )}
+                Send
+              </button>
+              <button
+                onClick={closeCompose}
+                disabled={composeSending}
+                className="px-4 py-2 rounded-full text-sm font-medium text-muted-foreground hover:bg-secondary transition-colors disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              {composeTo.trim() && !composeToValid && (
+                <span className="text-xs text-destructive ml-auto">
+                  Enter a valid email
+                </span>
+              )}
+            </div>
           </div>
         </div>
       )}

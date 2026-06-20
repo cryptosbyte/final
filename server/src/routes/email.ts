@@ -181,4 +181,44 @@ router.post("/email/reply", async (req: Request, res: Response) => {
   }
 });
 
+// Compose a brand-new email (not a reply to an existing thread). Sent from the
+// contact address via Brevo, same as replies but without threading headers.
+router.post("/email/send", async (req: Request, res: Response) => {
+  const { to, subject, text, html } = req.body as {
+    to?: string;
+    subject?: string;
+    text?: string;
+    html?: string;
+  };
+
+  const trimmedTo = to?.trim() ?? "";
+  const trimmedSubject = subject?.trim() ?? "";
+
+  if (!trimmedTo || !trimmedSubject || (!text?.trim() && !html?.trim())) {
+    res
+      .status(400)
+      .json({ error: "to, subject and a message body are required" });
+    return;
+  }
+
+  const recipient = parseEmailAddress(trimmedTo);
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(recipient)) {
+    res.status(400).json({ error: "A valid recipient email is required" });
+    return;
+  }
+
+  try {
+    await sendEmailViaBrevo({
+      to: recipient,
+      subject: trimmedSubject,
+      text,
+      html,
+    });
+    res.json({ success: true });
+  } catch (err) {
+    console.error("Compose send failed:", err);
+    res.status(500).json({ error: "Failed to send email" });
+  }
+});
+
 export default router;
