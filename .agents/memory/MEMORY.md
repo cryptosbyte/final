@@ -1,0 +1,1 @@
+- [Owner-only Gmail email feature](email-feature.md) — zakir.today owner email tab: Gmail OAuth is prod-only, no API-key shortcut, Brevo HTTP API, app runs from repo root on port 5000.

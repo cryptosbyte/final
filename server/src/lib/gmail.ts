@@ -126,6 +126,16 @@ export async function deleteTokensForUser(userId: string) {
   await db.delete(gmailTokensTable).where(eq(gmailTokensTable.userId, userId));
 }
 
+async function forceRefreshAccessToken(userId: string): Promise<string> {
+  const row = await getStoredTokens(userId);
+  if (!row || !row.refreshToken) {
+    throw new GmailNotConnectedError();
+  }
+  const refreshed = await refreshAccessToken(row.refreshToken);
+  await saveTokensForUser(userId, refreshed, row.email);
+  return refreshed.access_token;
+}
+
 async function getValidAccessToken(userId: string): Promise<string> {
   const row = await getStoredTokens(userId);
   if (!row || !row.refreshToken) {
@@ -140,10 +150,18 @@ async function getValidAccessToken(userId: string): Promise<string> {
 }
 
 async function gmailApi<T>(userId: string, path: string): Promise<T> {
-  const token = await getValidAccessToken(userId);
-  const res = await fetch(`${GMAIL_BASE}${path}`, {
+  let token = await getValidAccessToken(userId);
+  let res = await fetch(`${GMAIL_BASE}${path}`, {
     headers: { Authorization: `Bearer ${token}` },
   });
+  // The stored access token can be revoked/invalidated before its recorded
+  // expiry; on a 401 force one refresh and retry before giving up.
+  if (res.status === 401) {
+    token = await forceRefreshAccessToken(userId);
+    res = await fetch(`${GMAIL_BASE}${path}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+  }
   if (!res.ok) {
     throw new Error(`Gmail API error: ${res.status} ${await res.text()}`);
   }

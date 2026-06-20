@@ -6,7 +6,11 @@ import {
   type Response,
   type NextFunction,
 } from "express";
-import { CONTACT_ADDRESS, OWNER_USER_ID } from "../lib/emailConfig";
+import {
+  ALLOWED_GMAIL_ADDRESS,
+  CONTACT_ADDRESS,
+  OWNER_USER_ID,
+} from "../lib/emailConfig";
 import {
   buildAuthUrl,
   deleteTokensForUser,
@@ -91,6 +95,16 @@ router.post("/email/oauth/exchange", async (req: Request, res: Response) => {
   try {
     const tokens = await exchangeCode(code);
     const email = await getUserInfoEmail(tokens.access_token);
+    if (
+      ALLOWED_GMAIL_ADDRESS &&
+      (email ?? "").trim().toLowerCase() !== ALLOWED_GMAIL_ADDRESS
+    ) {
+      res.status(400).json({
+        error: "wrong_account",
+        message: `Connect the ${ALLOWED_GMAIL_ADDRESS} account (contact@zakir.today is forwarded there). You authorized ${email ?? "an unknown account"}.`,
+      });
+      return;
+    }
     await saveTokensForUser(req.user!.id, tokens, email);
     res.json({ connected: true, email });
   } catch (err) {

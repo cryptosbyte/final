@@ -15,6 +15,16 @@ export const REPLY_FROM_EMAIL =
   process.env.EMAIL_REPLY_FROM || CONTACT_ADDRESS;
 export const REPLY_FROM_NAME = process.env.EMAIL_REPLY_FROM_NAME || "Zakir";
 
+// The Gmail account that contact@zakir.today is forwarded to (via ImprovMX).
+// OAuth connection is rejected unless the authorized Google account matches
+// this address, so the owner can't accidentally connect the wrong mailbox.
+// Empty string disables the check.
+export const ALLOWED_GMAIL_ADDRESS = (
+  process.env.EMAIL_ALLOWED_GMAIL || "m.zxkir28@gmail.com"
+)
+  .trim()
+  .toLowerCase();
+
 export const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || "";
 export const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET || "";
 export const GOOGLE_OAUTH_REDIRECT =
